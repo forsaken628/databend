@@ -370,6 +370,14 @@ impl GeographyColumn {
             lat: &self.lat,
         }
     }
+
+    pub fn lon(&self) -> &[f64] {
+        &self.lon
+    }
+
+    pub fn lat(&self) -> &[f64] {
+        &self.lat
+    }
 }
 
 pub struct GeographyIterator<'a> {

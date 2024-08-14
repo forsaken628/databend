@@ -14,6 +14,7 @@
 
 #![feature(box_patterns)]
 #![feature(try_blocks)]
+#![feature(test)]
 
 use databend_common_expression::types::DataType;
 use databend_common_expression::types::DecimalDataType;
@@ -29,6 +30,7 @@ mod column;
 mod common;
 mod decimal;
 mod fill_field_default_value;
+mod geo;
 mod group_by;
 mod input_columns;
 mod kernel;
