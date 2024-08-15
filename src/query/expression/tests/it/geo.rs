@@ -16,6 +16,7 @@ extern crate test;
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use arrow_array::Array;
 use arrow_buffer::NullBuffer;
@@ -23,6 +24,8 @@ use databend_common_expression::types::geography::Geography;
 use databend_common_expression::types::geography::GeographyColumn;
 use databend_common_expression::types::geography::GeographyColumnBuilder;
 use databend_common_expression::types::geography::GeographyRef;
+use databend_common_expression::types::DataType;
+use databend_common_expression::types::GeographyType;
 use databend_common_geobuf::Ewkb;
 use databend_common_geobuf::FeatureKind;
 use databend_common_geobuf::ObjectKind;
@@ -84,6 +87,87 @@ fn test_geobuf() {
 #[bench]
 fn bench_geobuf_load(b: &mut Bencher) {
     b.iter(|| load_geobuf())
+}
+
+#[test]
+fn test_geobuf_write_parquet() {
+    let all = load_geobuf();
+
+    let filename = format!(
+        "tests/it/testdata/temp_geobuf_{}.parquet",
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
+
+    write_geobuf(&all, &filename);
+}
+
+// file size: 67762549
+// test geo::bench_geobuf_write_parquet ... bench: 505,016,040.60 ns/iter (+/- 601,611,236.05)
+#[bench]
+fn bench_geobuf_write_parquet(b: &mut Bencher) {
+    let all = load_geobuf();
+
+    b.iter(|| {
+        let filename = format!(
+            "tests/it/testdata/temp_geobuf_{}.parquet",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
+        write_geobuf(&all, &filename);
+        std::fs::remove_file(&filename).unwrap();
+    })
+}
+
+// test geo::bench_geobuf_read_parquet  ... bench: 123,843,012.80 ns/iter (+/- 15,347,599.03)
+#[test]
+fn test_geobuf_read_parquet() {
+    let all = load_geobuf();
+
+    let filename = format!(
+        "tests/it/testdata/temp_geobuf_{}.parquet",
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
+
+    write_geobuf(&all, &filename);
+
+    let all = read_geobuf(&filename);
+
+    let statist = all.iter().fold(Statist::default(), |acc, column| Statist {
+        num_row: acc.num_row + column.len(),
+        mem: acc.mem + column.memory_size(),
+    });
+    println!("{statist:?}");
+
+    std::fs::remove_file(&filename).unwrap();
+}
+
+#[bench]
+fn bench_geobuf_read_parquet(b: &mut Bencher) {
+    let all = load_geobuf();
+
+    let filename = format!(
+        "tests/it/testdata/temp_geobuf_{}.parquet",
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
+
+    write_geobuf(&all, &filename);
+
+    b.iter(|| {
+        let _ = read_geobuf(&filename);
+    });
+
+    std::fs::remove_file(&filename).unwrap();
 }
 
 // test geo::bench_geobuf_bounds   ... bench:  25,642,409.80 ns/iter (+/- 2,727,722.00)
@@ -172,12 +256,50 @@ fn load_geobuf() -> Vec<GeographyColumn> {
             .downcast_ref::<arrow_array::BinaryArray>()
             .unwrap();
 
-        array_to_column(&geometry)
+        wbk_to_geobuf(&geometry)
     });
     reader.collect()
 }
 
-fn array_to_column(arr: &arrow_array::BinaryArray) -> GeographyColumn {
+fn write_geobuf(all: &[GeographyColumn], filename: &str) {
+    let file = std::fs::File::create(filename).unwrap();
+
+    let field = databend_common_expression::Column::Geography(all[0].clone()).arrow_field();
+    let schema = Arc::new(arrow_schema::Schema::new([Arc::new(field.into())]));
+
+    let mut writer = parquet::arrow::ArrowWriter::try_new(file, schema.clone(), None).unwrap();
+
+    for part in all.iter() {
+        let arr = databend_common_expression::Column::Geography(part.clone()).into_arrow_rs();
+        let batch = arrow_array::RecordBatch::try_new(schema.clone(), vec![Arc::new(arr)]).unwrap();
+        writer.write(&batch).unwrap();
+    }
+    writer.close().unwrap();
+}
+
+fn read_geobuf(filename: &str) -> Vec<GeographyColumn> {
+    let file = std::fs::File::open(filename).unwrap();
+
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let reader = reader.map(|batch| {
+        let batch = batch.unwrap();
+        let geometry = batch.column(0);
+        let column = databend_common_expression::Column::from_arrow_rs(
+            geometry.clone(),
+            &DataType::Geography,
+        )
+        .unwrap();
+
+        column.into_geography().unwrap()
+    });
+    reader.collect()
+}
+
+fn wbk_to_geobuf(arr: &arrow_array::BinaryArray) -> GeographyColumn {
     assert!(!arr.is_nullable());
     let mut builder = GeographyColumnBuilder::with_capacity(arr.len(), arr.len());
     for data in arr.iter() {
