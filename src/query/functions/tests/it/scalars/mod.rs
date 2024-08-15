@@ -39,6 +39,7 @@ mod comparison;
 mod control;
 mod datetime;
 mod geo;
+mod geography;
 // NOTE:(everpcpc) result different on macos
 // TODO: fix this in running on linux
 #[cfg(not(target_os = "macos"))]
