@@ -252,13 +252,54 @@ fn test_geobuf_as_geoarrow() {
 }
 
 // 就非原生算法而言，geoarrow的价值在于提供了一个通用的访问层。通用和效率是矛盾的。
-#[test]
-fn test_center() {
+// test geo::bench_geoarrow_center      ... bench: 140,231,467.80 ns/iter (+/- 23,895,793.41)
+#[bench]
+fn bench_geoarrow_center(b: &mut Bencher) {
     let all = load_geoarrow();
 
-    for part in all.iter() {
-        geoarrow::algorithm::geo::Center::center(part);
-    }
+    b.iter(|| {
+        for (i, part) in all.iter().enumerate() {
+            // GeometryCollection
+            if i == 387 {
+                continue;
+            }
+            geoarrow::algorithm::geo::Center::center(part);
+        }
+    })
+}
+
+// test geo::bench_geobuf_center        ... bench: 198,691,379.40 ns/iter (+/- 20,268,612.92)
+// 这个算法那么简单没道理不用原生实现啊，不就是先算bbox，然后算中点么？根本没必要构造geometry，bbox可以直接算的。
+#[bench]
+fn bench_geobuf_center(b: &mut Bencher) {
+    let all = load_geobuf();
+
+    b.iter(|| {
+        for (i, part) in all.iter().enumerate() {
+            // GeometryCollection
+            if i == 387 {
+                continue;
+            }
+            Column(part.clone()).center();
+        }
+    })
+}
+
+// test geo::bench_wkb_center           ... bench:  71,486,765.50 ns/iter (+/- 10,710,319.22)
+// 这里就好笑了，魔法越多，性能越差。
+#[bench]
+fn bench_wkb_center(b: &mut Bencher) {
+    let all = load_wkb();
+
+    b.iter(|| {
+        for (i, part) in all.iter().enumerate() {
+            // GeometryCollection
+            if i == 387 {
+                continue;
+            }
+            geoarrow::algorithm::geo::Center::center(part);
+        }
+    })
 }
 
 fn load_geobuf() -> Vec<GeographyColumn> {
@@ -371,6 +412,30 @@ fn load_geoarrow() -> Vec<MixedGeometryArray<i64, 2>> {
             .unwrap();
 
         wbk_to_mixed(&geometry)
+    });
+    reader.collect()
+}
+
+fn load_wkb() -> Vec<geoarrow::array::WKBArray<i32>> {
+    let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
+    let file = std::fs::File::open(&path).unwrap();
+
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let reader = reader.map(|batch| {
+        let batch = batch.unwrap();
+        let geometry = batch.column_by_name("geometry").unwrap();
+        let geometry = geometry
+            .as_any()
+            .downcast_ref::<arrow_array::BinaryArray>()
+            .unwrap();
+
+        let metadata = Arc::new(geoarrow::array::metadata::ArrayMetadata::default());
+
+        geoarrow::array::WKBArray::new(geometry.clone(), metadata)
     });
     reader.collect()
 }
@@ -502,6 +567,23 @@ impl geoarrow::trait_::GeometryArrayTrait for Column {
 
     fn as_ref(&self) -> &dyn GeometryArrayTrait {
         todo!()
+    }
+}
+
+impl Column {
+    fn center(&self) -> geoarrow::array::PointArray<2> {
+        use geo::BoundingRect;
+        use geoarrow::array::*;
+
+        let mut output_array = PointBuilder::with_capacity(self.len());
+        self.iter_geo().for_each(|maybe_g| {
+            output_array.push_point(
+                maybe_g
+                    .and_then(|g| g.bounding_rect().map(|rect| rect.center()))
+                    .as_ref(),
+            )
+        });
+        output_array.into()
     }
 }
 
