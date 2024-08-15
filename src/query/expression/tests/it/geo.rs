@@ -204,6 +204,28 @@ fn bench_geoarrow_load(b: &mut Bencher) {
     b.iter(|| load_geoarrow())
 }
 
+// https://github.com/apache/arrow-rs/issues/73
+// 不支持 Union，除非非标自己实现一个
+// https://github.com/apache/parquet-format/pull/240
+// https://github.com/opengeospatial/geoparquet/issues/222#issuecomment-2128298217
+// parquet 这边的意思是，没想好怎么办更好，先存WKB吧
+// https://github.com/opengeospatial/geoparquet/blob/main/format-specs/geoparquet.md
+// 没有 mixed，没有 GeometryCollection
+#[test]
+fn test_geoarrow_write_parquet() {
+    let all = load_geoarrow();
+
+    let filename = format!(
+        "tests/it/testdata/temp_geoarrow_{}.parquet",
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+    );
+
+    write_mixed(&all, &filename);
+}
+
 // test geo::bench_geoarrow_bounds ... bench:  89,073,962.70 ns/iter (+/- 4,899,218.94)
 // geoarrow 试图兼容所有的情况，交错布局的点，高维的点，wbk这种需要解码的才能访问的也要支持。
 // 他们的关注点在通用性，在整合各种情况，希望做成一个大而全的东西，而效率则是次要的，所以可以发现实现里面有一大堆抽象，也大量使用宏。
@@ -331,7 +353,7 @@ struct Statist {
     mem: usize,
 }
 
-fn load_geoarrow() -> Vec<MixedGeometryArray<i32, 2>> {
+fn load_geoarrow() -> Vec<MixedGeometryArray<i64, 2>> {
     let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
     let file = std::fs::File::open(&path).unwrap();
 
@@ -348,16 +370,16 @@ fn load_geoarrow() -> Vec<MixedGeometryArray<i32, 2>> {
             .downcast_ref::<arrow_array::BinaryArray>()
             .unwrap();
 
-        array_to_mixed(&geometry)
+        wbk_to_mixed(&geometry)
     });
     reader.collect()
 }
 
-fn array_to_mixed(arr: &arrow_array::BinaryArray) -> MixedGeometryArray<i32, 2> {
+fn wbk_to_mixed(arr: &arrow_array::BinaryArray) -> MixedGeometryArray<i64, 2> {
     let metadata = Arc::new(geoarrow::array::metadata::ArrayMetadata::default());
     let wkb_arr = geoarrow::array::WKBArray::new(arr.clone(), metadata);
 
-    let mut builder = geoarrow::array::MixedGeometryBuilder::<i32, 2>::new();
+    let mut builder = geoarrow::array::MixedGeometryBuilder::<i64, 2>::new();
 
     for wkb in wkb_arr.iter() {
         match wkb {
@@ -388,6 +410,22 @@ fn array_to_mixed(arr: &arrow_array::BinaryArray) -> MixedGeometryArray<i32, 2> 
     }
 
     builder.finish()
+}
+
+fn write_mixed(all: &[MixedGeometryArray<i64, 2>], filename: &str) {
+    let file = std::fs::File::create(filename).unwrap();
+
+    let field = all[0].data_type().to_field("mixed", false);
+    let schema = Arc::new(arrow_schema::Schema::new([Arc::new(field.into())]));
+
+    let mut writer = parquet::arrow::ArrowWriter::try_new(file, schema.clone(), None).unwrap();
+
+    for part in all.iter() {
+        let arr = part.to_array_ref();
+        let batch = arrow_array::RecordBatch::try_new(schema.clone(), vec![Arc::new(arr)]).unwrap();
+        writer.write(&batch).unwrap();
+    }
+    writer.close().unwrap();
 }
 
 #[derive(Debug)]
