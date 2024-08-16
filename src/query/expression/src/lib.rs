@@ -40,6 +40,7 @@
 #![feature(try_blocks)]
 #![feature(let_chains)]
 #![feature(trait_upcasting)]
+#![feature(adt_const_params)]
 
 #[allow(dead_code)]
 mod block;

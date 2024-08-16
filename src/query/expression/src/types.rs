@@ -24,6 +24,7 @@ pub mod empty_map;
 pub mod generic;
 pub mod geography;
 pub mod geometry;
+mod logical;
 pub mod map;
 pub mod null;
 pub mod nullable;
@@ -35,6 +36,7 @@ pub mod variant;
 
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::marker::ConstParamTy;
 use std::ops::Range;
 
 use databend_common_arrow::arrow::trusted_len::TrustedLen;
@@ -90,9 +92,15 @@ pub enum DataType {
     Tuple(Vec<DataType>),
     Variant,
     Geometry,
+    LogicalType((Box<DataType>, LogicalTypeIdent)),
 
     // Used internally for generic types
     Generic(usize),
+}
+
+#[derive(ConstParamTy, Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LogicalTypeIdent {
+    Point = 1,
 }
 
 impl DataType {
