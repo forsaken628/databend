@@ -37,47 +37,50 @@ pub use wkt_adapter::Wkt;
 #[derive(Clone)]
 pub struct Geometry {
     buf: Vec<u8>,
-    column_x: Buffer<f64>,
-    column_y: Buffer<f64>,
+    offsets: Buffer<u64>,
+    x: Buffer<f64>,
+    y: Buffer<f64>,
 }
 
 impl Geometry {
     pub fn as_ref(&self) -> GeometryRef<'_> {
         GeometryRef {
             buf: &self.buf,
-            column_x: self.column_x.as_slice(),
-            column_y: self.column_y.as_slice(),
+            offsets: self.offsets.clone(),
+            x: self.x.clone(),
+            y: self.y.clone(),
         }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct GeometryRef<'a> {
     buf: &'a [u8],
-    column_x: &'a [f64],
-    column_y: &'a [f64],
+    offsets: Buffer<u64>,
+    x: Buffer<f64>,
+    y: Buffer<f64>,
 }
 
 impl<'a> GeometryRef<'a> {
-    pub fn new(buf: &'a [u8], x: &'a [f64], y: &'a [f64]) -> Self {
+    pub fn new(buf: &'a [u8], offsets: Buffer<u64>, x: Buffer<f64>, y: Buffer<f64>) -> Self {
         debug_assert_eq!(x.len(), y.len());
-        GeometryRef {
-            buf,
-            column_x: x,
-            column_y: y,
-        }
+        GeometryRef { buf, offsets, x, y }
     }
 
     pub fn buf(&self) -> &[u8] {
         self.buf
     }
 
-    pub fn x(&self) -> &[f64] {
-        self.column_x
+    pub fn offsets(&self) -> Buffer<u64> {
+        self.offsets.clone()
     }
 
-    pub fn y(&self) -> &[f64] {
-        self.column_y
+    pub fn x(&self) -> Buffer<f64> {
+        self.x.clone()
+    }
+
+    pub fn y(&self) -> Buffer<f64> {
+        self.y.clone()
     }
 }
 
@@ -85,8 +88,9 @@ impl<'a> GeometryRef<'a> {
     pub fn to_owned(&self) -> Geometry {
         Geometry {
             buf: self.buf.to_vec(),
-            column_x: Buffer::from(self.column_x.to_vec()),
-            column_y: Buffer::from(self.column_y.to_vec()),
+            offsets: self.offsets.clone(),
+            x: self.x.clone(),
+            y: self.y.clone(),
         }
     }
 }

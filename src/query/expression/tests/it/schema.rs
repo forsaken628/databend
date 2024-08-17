@@ -665,7 +665,7 @@ fn test_geography_as_arrow() {
 
     let arr = col.as_arrow();
     assert_eq!(
-        "StructArray[{buf: [1], points: [{x: 1, y: 2}]}, {buf: [1], points: [{x: 2, y: 3}]}, {buf: [1], points: [{x: 4, y: 5}]}]",
+        "StructArray[{buf: [1], polygon: [[{x: 1, y: 2}]]}, {buf: [1], polygon: [[{x: 2, y: 3}]]}, {buf: [1], polygon: [[{x: 4, y: 5}]]}]",
         format!("{:?}", arr)
     );
 

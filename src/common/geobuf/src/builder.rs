@@ -31,9 +31,9 @@ use crate::Visitor;
 #[derive(Default)]
 pub struct GeometryBuilder<'fbb> {
     fbb: flatbuffers::FlatBufferBuilder<'fbb>,
-    column_x: Vec<f64>,
-    column_y: Vec<f64>,
-    point_offsets: Vec<u32>,
+    x: Vec<f64>,
+    y: Vec<f64>,
+    point_offsets: Vec<u64>,
     ring_offsets: Vec<u32>,
     properties: Option<Vec<u8>>,
     temp_kind: Option<ObjectKind>,
@@ -48,9 +48,9 @@ impl<'fbb> GeometryBuilder<'fbb> {
     pub fn new() -> Self {
         Self {
             fbb: FlatBufferBuilder::new(),
-            column_x: Vec::new(),
-            column_y: Vec::new(),
-            point_offsets: Vec::new(),
+            x: Vec::new(),
+            y: Vec::new(),
+            point_offsets: vec![0],
             ring_offsets: Vec::new(),
             properties: None,
             temp_kind: None,
@@ -63,22 +63,12 @@ impl<'fbb> GeometryBuilder<'fbb> {
     }
 
     pub fn point_len(&self) -> usize {
-        self.column_x.len()
+        self.x.len()
     }
 
     fn push_point(&mut self, x: f64, y: f64) {
-        self.column_x.push(x);
-        self.column_y.push(y);
-    }
-
-    fn create_point_offsets(&mut self) -> Option<WIPOffset<Vector<'fbb, u32>>> {
-        if self.point_offsets.len() > 1 {
-            let v = Some(self.fbb.create_vector(&self.point_offsets));
-            self.point_offsets.clear();
-            v
-        } else {
-            None
-        }
+        self.x.push(x);
+        self.y.push(y);
     }
 
     fn create_ring_offsets(&mut self) -> Option<WIPOffset<Vector<'fbb, u32>>> {
@@ -101,8 +91,9 @@ impl<'fbb> GeometryBuilder<'fbb> {
     pub fn build(self) -> Geometry {
         let GeometryBuilder {
             mut fbb,
-            column_x,
-            column_y,
+            point_offsets,
+            x,
+            y,
             kind,
             object,
             ..
@@ -126,8 +117,9 @@ impl<'fbb> GeometryBuilder<'fbb> {
 
         Geometry {
             buf,
-            column_x: Buffer::from(column_x),
-            column_y: Buffer::from(column_y),
+            offsets: Buffer::from(point_offsets),
+            x: Buffer::from(x),
+            y: Buffer::from(y),
         }
     }
 
@@ -142,41 +134,40 @@ impl<'fbb> GeometryBuilder<'fbb> {
 
 impl<'fbb> Visitor for GeometryBuilder<'fbb> {
     fn visit_point(&mut self, x: f64, y: f64, multi: bool) -> GeoResult<()> {
-        if self.stack.is_empty() {
-            self.push_point(x, y);
-            return Ok(());
-        }
-
         if multi {
             self.push_point(x, y);
         } else {
-            if self.point_offsets.is_empty() {
-                self.point_offsets.push(self.point_len() as u32)
+            if !self.stack.is_empty() && self.ring_offsets.is_empty() {
+                self.ring_offsets.push(self.point_offsets.len() as u32 - 1);
             }
             self.push_point(x, y);
-            self.point_offsets.push(self.point_len() as u32);
+            self.point_offsets.push(self.point_len() as u64);
+            if !self.stack.is_empty() {
+                self.ring_offsets.push(self.point_offsets.len() as u32 - 1);
+            }
         }
 
         Ok(())
     }
 
     fn visit_points_start(&mut self, _: usize) -> GeoResult<()> {
-        if !self.stack.is_empty() && self.point_offsets.is_empty() {
-            self.point_offsets.push(self.point_len() as u32)
+        if !self.stack.is_empty() && self.ring_offsets.is_empty() {
+            self.ring_offsets.push(self.point_offsets.len() as u32 - 1);
         }
         Ok(())
     }
 
     fn visit_points_end(&mut self, multi: bool) -> GeoResult<()> {
-        if multi || !self.stack.is_empty() {
-            self.point_offsets.push(self.point_len() as u32);
+        self.point_offsets.push(self.point_len() as u64);
+        if !self.stack.is_empty() && !multi {
+            self.ring_offsets.push(self.point_offsets.len() as u32 - 1);
         }
         Ok(())
     }
 
     fn visit_lines_start(&mut self, _: usize) -> GeoResult<()> {
-        if self.point_offsets.is_empty() {
-            self.point_offsets.push(self.point_len() as u32)
+        if !self.stack.is_empty() && self.ring_offsets.is_empty() {
+            self.ring_offsets.push(self.point_offsets.len() as u32 - 1);
         }
         Ok(())
     }
@@ -189,8 +180,8 @@ impl<'fbb> Visitor for GeometryBuilder<'fbb> {
     }
 
     fn visit_polygon_start(&mut self, _: usize) -> GeoResult<()> {
-        if self.point_offsets.is_empty() {
-            self.point_offsets.push(self.point_len() as u32)
+        if !self.stack.is_empty() && self.ring_offsets.is_empty() {
+            self.ring_offsets.push(self.point_offsets.len() as u32 - 1);
         }
         Ok(())
     }
@@ -204,7 +195,7 @@ impl<'fbb> Visitor for GeometryBuilder<'fbb> {
 
     fn visit_polygons_start(&mut self, _: usize) -> GeoResult<()> {
         if self.ring_offsets.is_empty() {
-            self.ring_offsets.push(self.point_len() as u32)
+            self.ring_offsets.push(self.point_offsets.len() as u32 - 1)
         }
         Ok(())
     }
@@ -237,22 +228,16 @@ impl<'fbb> Visitor for GeometryBuilder<'fbb> {
         match kind {
             FeatureKind::Geometry(object_kind) | FeatureKind::Feature(object_kind) => {
                 if self.stack.is_empty() {
-                    let point_offsets = self.create_point_offsets();
                     let ring_offsets = self.create_ring_offsets();
                     let properties = self.create_properties();
                     let srid = self.srid;
 
-                    if point_offsets.is_none()
-                        && ring_offsets.is_none()
-                        && properties.is_none()
-                        && srid == 0
-                    {
+                    if ring_offsets.is_none() && properties.is_none() && srid == 0 {
                         self.object = None
                     } else {
                         self.object = Some(geo_buf::Object::create(
                             &mut self.fbb,
                             &geo_buf::ObjectArgs {
-                                point_offsets,
                                 ring_offsets,
                                 srid,
                                 properties,
@@ -300,12 +285,10 @@ impl<'fbb> Visitor for GeometryBuilder<'fbb> {
                     | ObjectKind::MultiLineString
                     | ObjectKind::Polygon
                     | ObjectKind::MultiPolygon => {
-                        let point_offsets = self.create_point_offsets();
                         let ring_offsets = self.create_ring_offsets();
                         let properties = self.create_properties();
                         geo_buf::InnerObject::create(&mut self.fbb, &geo_buf::InnerObjectArgs {
                             wkb_type: object_kind.into(),
-                            point_offsets,
                             ring_offsets,
                             properties,
                             ..Default::default()

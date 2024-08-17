@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::io;
+use std::marker::PhantomData;
 use std::ops::Range;
 
 use borsh::BorshDeserialize;
@@ -28,10 +29,12 @@ use databend_common_geobuf::ObjectKind;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::array::*;
+use super::binary::BinaryType;
+use super::number::Float64Type;
 use crate::property::Domain;
 use crate::types::binary::BinaryColumn;
 use crate::types::binary::BinaryColumnBuilder;
-use crate::types::binary::BinaryIterator;
 use crate::types::ArgType;
 use crate::types::DataType;
 use crate::types::DecimalSize;
@@ -91,10 +94,30 @@ impl PartialEq for Geography {
 
 impl Eq for Geography {}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
+type CoordType = Pair<Float64Type, Float64Type>;
+pub type PolygonType = ArrayType<ArrayType<CoordType>>;
+
+type Item = (Vec<u8>, ArrayColumn<CoordType>);
+type ItemRef<'a> = (&'a [u8], ArrayColumn<CoordType>);
+
+impl Geography {
+    fn new((buf, polygon): Item) -> Self {
+        let x = unsafe { std::mem::transmute::<Buffer<F64>, Buffer<f64>>(polygon.values.0) };
+        let y = unsafe { std::mem::transmute::<Buffer<F64>, Buffer<f64>>(polygon.values.1) };
+        Self(Geometry::new(buf, polygon.offsets, x, y))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
 pub struct GeographyRef<'a>(pub GeometryRef<'a>);
 
 impl<'a> GeographyRef<'a> {
+    pub fn new((buf, polygon): ItemRef<'a>) -> Self {
+        let lon = unsafe { std::mem::transmute::<Buffer<F64>, Buffer<f64>>(polygon.values.0) };
+        let lat = unsafe { std::mem::transmute::<Buffer<F64>, Buffer<f64>>(polygon.values.1) };
+        GeographyRef(GeometryRef::new(buf, polygon.offsets, lon, lat))
+    }
+
     pub fn to_owned(&self) -> Geography {
         Geography(self.0.to_owned())
     }
@@ -117,6 +140,21 @@ impl<'a> GeographyRef<'a> {
             return Err("latitude is out of range".to_string());
         }
         Ok(())
+    }
+
+    fn as_item_ref(&'a self) -> ItemRef<'a> {
+        let buf = self.0.buf();
+
+        let offsets = self.0.offsets();
+        let lon = unsafe { std::mem::transmute::<Buffer<f64>, Buffer<F64>>(self.0.x()) };
+        let lat = unsafe { std::mem::transmute::<Buffer<f64>, Buffer<F64>>(self.0.y()) };
+
+        let polygon = ArrayColumn {
+            values: PairColumn(lon, lat),
+            offsets,
+        };
+
+        (buf, polygon)
     }
 }
 
@@ -285,52 +323,45 @@ impl GeographyType {
     pub fn point_column(lon: Buffer<F64>, lat: Buffer<F64>) -> GeographyColumn {
         debug_assert_eq!(lon.len(), lat.len());
 
-        let lon = unsafe { std::mem::transmute::<Buffer<F64>, Buffer<f64>>(lon) };
-        let lat = unsafe { std::mem::transmute::<Buffer<F64>, Buffer<f64>>(lat) };
         let n = lon.len();
         let buf_item = [FeatureKind::Geometry(ObjectKind::Point).as_u8()];
         let buf = BinaryColumnBuilder::repeat(&buf_item, n).build();
-        let offsets = (0u64..=n as u64).collect();
+        let offsets: Buffer<_> = (0u64..=n as u64).collect();
 
-        GeographyColumn {
-            buf,
-            offsets,
-            lon,
-            lat,
-        }
+        GeographyColumn::new(buf, lon, lat, offsets.clone(), offsets)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GeographyColumn {
-    pub(crate) buf: BinaryColumn,
-    pub(crate) offsets: Buffer<u64>,
-    pub(crate) lon: Buffer<f64>,
-    pub(crate) lat: Buffer<f64>,
-}
+pub struct GeographyColumn(pub PairColumn<BinaryType, PolygonType>);
 
 impl GeographyColumn {
+    pub fn new(
+        buf: BinaryColumn,
+        lon: Buffer<F64>,
+        lat: Buffer<F64>,
+        ring_offsets: Buffer<u64>,
+        polygon_offsets: Buffer<u64>,
+    ) -> Self {
+        GeographyColumn(PairColumn(buf, ArrayColumn {
+            values: ArrayColumn {
+                values: PairColumn(lon, lat),
+                offsets: ring_offsets,
+            },
+            offsets: polygon_offsets,
+        }))
+    }
+
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.0.len()
     }
 
     pub fn memory_size(&self) -> usize {
-        let offsets = self.offsets.as_slice();
-        let len = offsets.len();
-        self.buf.memory_size() + len * 8 + (offsets[len - 1] - offsets[0]) as usize * 16
+        self.0.memory_size()
     }
 
-    pub fn index(&self, index: usize) -> Option<GeographyRef> {
-        if index + 1 < self.offsets.len() {
-            let buf = self.buf.index(index).unwrap();
-            let start = self.offsets[index] as usize;
-            let end = self.offsets[index + 1] as usize;
-            let lon = &self.lon[start..end];
-            let lat = &self.lat[start..end];
-            Some(GeographyRef(GeometryRef::new(buf, lon, lat)))
-        } else {
-            None
-        }
+    pub fn index(&self, index: usize) -> Option<GeographyRef<'_>> {
+        self.0.index(index).map(GeographyRef::new)
     }
 
     /// # Safety
@@ -338,46 +369,27 @@ impl GeographyColumn {
     /// Calling this method with an out-of-bounds index is *[undefined behavior]*
     #[inline]
     pub unsafe fn index_unchecked(&self, index: usize) -> GeographyRef<'_> {
-        let buf = self.buf.index_unchecked(index);
-        let start = *self.offsets.get_unchecked(index) as usize;
-        let end = *self.offsets.get_unchecked(index + 1) as usize;
-        let lon = self.lon.get_unchecked(start..end);
-        let lat = self.lat.get_unchecked(start..end);
-        GeographyRef(GeometryRef::new(buf, lon, lat))
+        GeographyRef::new(self.0.index_unchecked(index))
     }
 
     pub fn slice(&self, range: Range<usize>) -> Self {
-        let buf = self.buf.slice(range.clone());
-        let offsets = self
-            .offsets
-            .clone()
-            .sliced(range.start, range.end - range.start + 1);
-        let lon = self.lon.clone();
-        let lat = self.lat.clone();
-        GeographyColumn {
-            buf,
-            offsets,
-            lon,
-            lat,
-        }
+        GeographyColumn(self.0.slice(range))
     }
 
     pub fn iter(&self) -> GeographyIterator<'_> {
-        GeographyIterator {
-            buf: self.buf.iter(),
-            offsets: self.offsets.windows(2),
-            lon: &self.lon,
-            lat: &self.lat,
-        }
+        GeographyIterator(self.0.iter())
+    }
+
+    pub fn lon(&self) -> &[F64] {
+        &self.0.1.values.values.0
+    }
+
+    pub fn lat(&self) -> &[F64] {
+        &self.0.1.values.values.1
     }
 }
 
-pub struct GeographyIterator<'a> {
-    pub(crate) buf: BinaryIterator<'a>,
-    pub(crate) offsets: std::slice::Windows<'a, u64>,
-    pub(crate) lon: &'a [f64],
-    pub(crate) lat: &'a [f64],
-}
+pub struct GeographyIterator<'a>(PairIterator<'a, BinaryType, PolygonType>);
 
 unsafe impl<'a> TrustedLen for GeographyIterator<'a> {}
 
@@ -387,112 +399,50 @@ impl<'a> Iterator for GeographyIterator<'a> {
     type Item = GeographyRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.buf.next().map(|buf| {
-            let range = match self.offsets.next().unwrap() {
-                [start, end] => (*start as usize)..(*end as usize),
-                _ => unreachable!(),
-            };
-            let lon = &self.lon[range.clone()];
-            let lat = &self.lat[range];
-            GeographyRef(GeometryRef::new(buf, lon, lat))
-        })
+        self.0.next().map(GeographyRef::new)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.buf.size_hint()
+        self.0.size_hint()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct GeographyColumnBuilder {
-    pub(crate) buf: BinaryColumnBuilder,
-    pub(crate) offsets: Vec<u64>,
-    pub(crate) lon: Vec<f64>,
-    pub(crate) lat: Vec<f64>,
-}
+pub struct GeographyColumnBuilder(pub PairColumnBuilder<BinaryType, PolygonType>);
 
 impl GeographyColumnBuilder {
-    pub fn with_capacity(len: usize, data_capacity: usize) -> Self {
-        let mut offsets = Vec::with_capacity(len + 1);
-        offsets.push(0);
-        GeographyColumnBuilder {
-            buf: BinaryColumnBuilder::with_capacity(len, data_capacity),
-            offsets,
-            lon: Vec::with_capacity(len),
-            lat: Vec::with_capacity(len),
-        }
+    pub fn with_capacity(len: usize, _: usize) -> Self {
+        GeographyColumnBuilder(PairColumnBuilder::with_capacity(len, &[]))
     }
 
     pub fn from_column(col: GeographyColumn) -> Self {
-        GeographyColumnBuilder {
-            buf: BinaryColumnBuilder::from_column(col.buf),
-            offsets: col.offsets.to_vec(),
-            lon: col.lon.to_vec(),
-            lat: col.lat.to_vec(),
-        }
+        GeographyColumnBuilder(PairColumnBuilder::from_column(col.0))
     }
 
     pub fn repeat(item: &GeographyRef<'_>, n: usize) -> Self {
-        let buf = BinaryColumnBuilder::repeat(item.0.buf(), n);
-
-        let col_lon = item.0.x();
-        let col_lat = item.0.y();
-        let len = col_lon.len();
-        let mut lon = Vec::with_capacity(len * n);
-        let mut lat = Vec::with_capacity(len * n);
-        let mut offsets = Vec::with_capacity(n + 1);
-        offsets.push(0);
-
-        for _ in 0..n {
-            lon.extend_from_slice(col_lon);
-            lat.extend_from_slice(col_lat);
-            offsets.push(lon.len() as u64);
-        }
-
-        Self {
-            buf,
-            offsets,
-            lon,
-            lat,
-        }
+        let (buf, array) = item.as_item_ref();
+        GeographyColumnBuilder(PairColumnBuilder(
+            BinaryColumnBuilder::repeat(buf, n),
+            ArrayColumnBuilder::repeat(&array, n),
+        ))
     }
 
     pub fn repeat_default(n: usize) -> Self {
         let item = Geography::default();
         let item = item.as_ref();
-
         Self::repeat(&item, n)
     }
 
     pub fn len(&self) -> usize {
-        self.offsets.len() - 1
+        self.0.len()
     }
 
     pub fn push(&mut self, item: GeographyRef<'_>) {
-        debug_assert_eq!(item.0.x().len(), item.0.y().len());
-        self.buf.put(item.0.buf());
-        self.buf.commit_row();
-
-        self.lon.extend_from_slice(item.0.x());
-        self.lat.extend_from_slice(item.0.y());
-        self.offsets.push(self.lon.len() as u64);
+        self.0.push(item.as_item_ref())
     }
 
     pub fn push_repeat(&mut self, item: GeographyRef<'_>, n: usize) {
-        debug_assert_eq!(item.0.x().len(), item.0.y().len());
-        self.buf.push_repeat(item.0.buf(), n);
-
-        let lon = item.0.x();
-        let lat = item.0.y();
-        let len = lon.len();
-        self.lon.reserve(len * n);
-        self.lat.reserve(len * n);
-        self.offsets.reserve(len);
-        for _ in 0..n {
-            self.lon.extend_from_slice(lon);
-            self.lat.extend_from_slice(lat);
-            self.offsets.push(self.lon.len() as u64);
-        }
+        self.0.push_repeat(item.as_item_ref(), n)
     }
 
     pub fn push_default(&mut self) {
@@ -500,59 +450,327 @@ impl GeographyColumnBuilder {
     }
 
     pub fn append_column(&mut self, other: &GeographyColumn) {
-        // the first offset of other column may not be zero
-        let other_start = *other.offsets.first().unwrap();
-        let start = self.offsets.last().cloned().unwrap();
-        self.offsets.extend(
-            other
-                .offsets
-                .iter()
-                .skip(1)
-                .map(|offset| offset + start - other_start),
-        );
-        self.buf.append_column(&other.buf);
-        self.lon.extend(other.lon.iter());
-        self.lat.extend(other.lat.iter());
+        self.0.append_column(&other.0);
     }
 
     pub fn build(self) -> GeographyColumn {
-        let Self {
-            buf,
-            offsets,
-            lon,
-            lat,
-        } = self;
-        GeographyColumn {
-            buf: buf.build(),
-            offsets: Buffer::from(offsets),
-            lon: Buffer::from(lon),
-            lat: Buffer::from(lat),
-        }
+        GeographyColumn(self.0.build())
     }
 
-    pub fn build_scalar(mut self) -> Geography {
+    pub fn build_scalar(self) -> Geography {
         assert_eq!(self.len(), 1);
-        self.pop().unwrap()
+        Geography::new(self.0.build_scalar())
     }
 
     pub fn pop(&mut self) -> Option<Geography> {
         if self.len() > 0 {
-            let at = self.lon.len()
-                - (self.offsets[self.offsets.len() - 1] - self.offsets[self.offsets.len() - 2])
-                    as usize;
-            self.offsets.pop();
-            let lon = self.lon.split_off(at);
-            let lat = self.lat.split_off(at);
-            let buf = self.buf.pop().unwrap();
-            Some(Geography(Geometry::new(buf, lon, lat)))
+            let buf = &mut self.0.0;
+            let polygon_offsets = &mut self.0.1.offsets;
+            let ring_offsets = &mut self.0.1.builder.offsets;
+            let x = &mut self.0.1.builder.builder.0;
+            let y = &mut self.0.1.builder.builder.1;
+
+            let mut ring_offsets_tails =
+                ring_offsets.split_off(polygon_offsets[polygon_offsets.len() - 2] as usize);
+            let start = ring_offsets_tails[0];
+            ring_offsets.push(start);
+
+            let x = x.split_off(start as usize);
+            let y = y.split_off(start as usize);
+
+            let buf = buf.pop().unwrap();
+            polygon_offsets.pop().unwrap();
+
+            for v in ring_offsets_tails.iter_mut() {
+                *v -= start
+            }
+
+            Some(Geography::new((buf, ArrayColumn {
+                values: PairColumn(x.into(), y.into()),
+                offsets: ring_offsets_tails.into(),
+            })))
         } else {
             None
         }
     }
 
     pub fn memory_size(&self) -> usize {
-        let offsets = self.offsets.as_slice();
-        let len = offsets.len();
-        self.buf.memory_size() + len * 8 + (offsets[len - 1] - offsets[0]) as usize * 16
+        self.0.0.memory_size()
+            + self.0.1.offsets.len() * 8
+            + self.0.1.builder.offsets.len() * 8
+            + self.0.1.builder.builder.0.len() * 8
+            + self.0.1.builder.builder.1.len() * 8
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pair<T: ValueType, U: ValueType>(PhantomData<(T, U)>);
+
+impl<T: ValueType, U: ValueType> ValueType for Pair<T, U> {
+    type Scalar = (T::Scalar, U::Scalar);
+    type ScalarRef<'a> = (T::ScalarRef<'a>, U::ScalarRef<'a>);
+    type Column = PairColumn<T, U>;
+    type Domain = (T::Domain, U::Domain);
+    type ColumnIterator<'a> = PairIterator<'a, T, U>;
+    type ColumnBuilder = PairColumnBuilder<T, U>;
+
+    #[inline]
+    fn upcast_gat<'short, 'long: 'short>(long: Self::ScalarRef<'long>) -> Self::ScalarRef<'short> {
+        (T::upcast_gat(long.0), U::upcast_gat(long.1))
+    }
+
+    fn to_owned_scalar((t, u): Self::ScalarRef<'_>) -> Self::Scalar {
+        (T::to_owned_scalar(t), U::to_owned_scalar(u))
+    }
+
+    fn to_scalar_ref((t, u): &Self::Scalar) -> Self::ScalarRef<'_> {
+        (T::to_scalar_ref(t), U::to_scalar_ref(u))
+    }
+
+    fn try_downcast_scalar<'a>(scalar: &'a ScalarRef) -> Option<Self::ScalarRef<'a>> {
+        match scalar {
+            ScalarRef::Tuple(fields) if fields.len() == 2 => Some((
+                T::try_downcast_scalar(&fields[0])?,
+                U::try_downcast_scalar(&fields[1])?,
+            )),
+            _ => None,
+        }
+    }
+
+    fn try_downcast_column(col: &Column) -> Option<Self::Column> {
+        match col {
+            Column::Tuple(fields) if fields.len() == 2 => Some(PairColumn(
+                T::try_downcast_column(&fields[0])?,
+                U::try_downcast_column(&fields[1])?,
+            )),
+            _ => None,
+        }
+    }
+
+    fn try_downcast_domain(domain: &Domain) -> Option<Self::Domain> {
+        match domain {
+            Domain::Tuple(fields) if fields.len() == 2 => Some((
+                T::try_downcast_domain(&fields[0])?,
+                U::try_downcast_domain(&fields[1])?,
+            )),
+            _ => None,
+        }
+    }
+
+    fn try_downcast_builder(_builder: &mut ColumnBuilder) -> Option<&mut Self::ColumnBuilder> {
+        None
+    }
+
+    fn try_downcast_owned_builder<'a>(_builder: ColumnBuilder) -> Option<Self::ColumnBuilder> {
+        None
+    }
+
+    fn try_upcast_column_builder(
+        _builder: Self::ColumnBuilder,
+        _decimal_size: Option<DecimalSize>,
+    ) -> Option<ColumnBuilder> {
+        None
+    }
+
+    fn upcast_scalar((k, v): Self::Scalar) -> Scalar {
+        Scalar::Tuple(vec![T::upcast_scalar(k), U::upcast_scalar(v)])
+    }
+
+    fn upcast_column(col: Self::Column) -> Column {
+        Column::Tuple(vec![T::upcast_column(col.0), U::upcast_column(col.1)])
+    }
+
+    fn upcast_domain((t, u): Self::Domain) -> Domain {
+        Domain::Tuple(vec![T::upcast_domain(t), U::upcast_domain(u)])
+    }
+
+    fn column_len(col: &Self::Column) -> usize {
+        col.len()
+    }
+
+    fn index_column(col: &Self::Column, index: usize) -> Option<Self::ScalarRef<'_>> {
+        col.index(index)
+    }
+
+    unsafe fn index_column_unchecked(col: &Self::Column, index: usize) -> Self::ScalarRef<'_> {
+        col.index_unchecked(index)
+    }
+
+    fn slice_column(col: &Self::Column, range: Range<usize>) -> Self::Column {
+        col.slice(range)
+    }
+
+    fn iter_column(col: &Self::Column) -> Self::ColumnIterator<'_> {
+        col.iter()
+    }
+
+    fn column_to_builder(col: Self::Column) -> Self::ColumnBuilder {
+        PairColumnBuilder::from_column(col)
+    }
+
+    fn builder_len(builder: &Self::ColumnBuilder) -> usize {
+        builder.len()
+    }
+
+    fn push_item(builder: &mut Self::ColumnBuilder, item: Self::ScalarRef<'_>) {
+        builder.push(item);
+    }
+
+    fn push_item_repeat(builder: &mut Self::ColumnBuilder, item: Self::ScalarRef<'_>, n: usize) {
+        builder.push_repeat(item, n)
+    }
+
+    fn push_default(builder: &mut Self::ColumnBuilder) {
+        builder.push_default();
+    }
+
+    fn append_column(builder: &mut Self::ColumnBuilder, other_builder: &Self::Column) {
+        builder.append_column(other_builder);
+    }
+
+    fn build_column(builder: Self::ColumnBuilder) -> Self::Column {
+        builder.build()
+    }
+
+    fn build_scalar(builder: Self::ColumnBuilder) -> Self::Scalar {
+        builder.build_scalar()
+    }
+
+    fn scalar_memory_size((t, u): &Self::ScalarRef<'_>) -> usize {
+        T::scalar_memory_size(t) + U::scalar_memory_size(u)
+    }
+
+    fn column_memory_size(col: &Self::Column) -> usize {
+        col.memory_size()
+    }
+}
+
+impl<K: ArgType, V: ArgType> ArgType for Pair<K, V> {
+    fn data_type() -> DataType {
+        DataType::Tuple(vec![K::data_type(), V::data_type()])
+    }
+
+    fn full_domain() -> Self::Domain {
+        (K::full_domain(), V::full_domain())
+    }
+
+    fn create_builder(capacity: usize, generics: &GenericMap) -> Self::ColumnBuilder {
+        PairColumnBuilder::with_capacity(capacity, generics)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PairColumn<T: ValueType, U: ValueType>(pub T::Column, pub U::Column);
+
+impl<T: ValueType, U: ValueType> PairColumn<T, U> {
+    pub fn len(&self) -> usize {
+        T::column_len(&self.0)
+    }
+
+    pub fn index(&self, index: usize) -> Option<(T::ScalarRef<'_>, U::ScalarRef<'_>)> {
+        Some((
+            T::index_column(&self.0, index)?,
+            U::index_column(&self.1, index)?,
+        ))
+    }
+
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds index is *[undefined behavior]*
+    pub unsafe fn index_unchecked(&self, index: usize) -> (T::ScalarRef<'_>, U::ScalarRef<'_>) {
+        (
+            T::index_column_unchecked(&self.0, index),
+            U::index_column_unchecked(&self.1, index),
+        )
+    }
+
+    pub fn slice(&self, range: Range<usize>) -> Self {
+        PairColumn(
+            T::slice_column(&self.0, range.clone()),
+            U::slice_column(&self.1, range),
+        )
+    }
+
+    pub fn iter(&self) -> PairIterator<T, U> {
+        PairIterator(T::iter_column(&self.0), U::iter_column(&self.1))
+    }
+
+    pub fn memory_size(&self) -> usize {
+        T::column_memory_size(&self.0) + U::column_memory_size(&self.1)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PairColumnBuilder<T: ValueType, U: ValueType>(
+    pub T::ColumnBuilder,
+    pub U::ColumnBuilder,
+);
+
+impl<T: ValueType, U: ValueType> PairColumnBuilder<T, U> {
+    pub fn from_column(col: PairColumn<T, U>) -> Self {
+        Self(T::column_to_builder(col.0), U::column_to_builder(col.1))
+    }
+
+    pub fn len(&self) -> usize {
+        T::builder_len(&self.0)
+    }
+
+    pub fn push(&mut self, (t, u): (T::ScalarRef<'_>, U::ScalarRef<'_>)) {
+        T::push_item(&mut self.0, t);
+        U::push_item(&mut self.1, u);
+    }
+
+    pub fn push_repeat(&mut self, (t, u): (T::ScalarRef<'_>, U::ScalarRef<'_>), n: usize) {
+        T::push_item_repeat(&mut self.0, t, n);
+        U::push_item_repeat(&mut self.1, u, n);
+    }
+
+    pub fn push_default(&mut self) {
+        T::push_default(&mut self.0);
+        U::push_default(&mut self.1);
+    }
+
+    pub fn append_column(&mut self, other: &PairColumn<T, U>) {
+        T::append_column(&mut self.0, &other.0);
+        U::append_column(&mut self.1, &other.1);
+    }
+
+    pub fn build(self) -> PairColumn<T, U> {
+        PairColumn(T::build_column(self.0), U::build_column(self.1))
+    }
+
+    pub fn build_scalar(self) -> (T::Scalar, U::Scalar) {
+        (T::build_scalar(self.0), U::build_scalar(self.1))
+    }
+}
+
+impl<T: ArgType, U: ArgType> PairColumnBuilder<T, U> {
+    pub fn with_capacity(capacity: usize, generics: &GenericMap) -> Self {
+        Self(
+            T::create_builder(capacity, generics),
+            U::create_builder(capacity, generics),
+        )
+    }
+}
+
+unsafe impl<'a, T: ValueType, U: ValueType> TrustedLen for PairIterator<'a, T, U> {}
+
+unsafe impl<'a, T: ValueType, U: ValueType> std::iter::TrustedLen for PairIterator<'a, T, U> {}
+
+pub struct PairIterator<'a, T: ValueType, U: ValueType>(
+    T::ColumnIterator<'a>,
+    U::ColumnIterator<'a>,
+);
+
+impl<'a, T: ValueType, U: ValueType> Iterator for PairIterator<'a, T, U> {
+    type Item = (T::ScalarRef<'a>, U::ScalarRef<'a>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some((self.0.next()?, self.1.next()?))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        assert_eq!(self.0.size_hint(), self.1.size_hint());
+        self.0.size_hint()
     }
 }

@@ -28,45 +28,47 @@ use crate::Geometry;
 use crate::GeometryRef;
 
 #[derive(Serialize, BorshSerialize)]
-struct Ser<'a>(&'a [u8], &'a [f64], &'a [f64]);
+struct Ser<'a>(&'a [u8], &'a [u64], &'a [f64], &'a [f64]);
 
 #[derive(Deserialize, BorshDeserialize)]
-struct De(Vec<u8>, Vec<f64>, Vec<f64>);
+struct De(Vec<u8>, Vec<u64>, Vec<f64>, Vec<f64>);
 
 impl Serialize for GeometryRef<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: Serializer {
-        Serialize::serialize(&Ser(self.buf, self.column_x, self.column_y), serializer)
+        Serialize::serialize(&Ser(self.buf, &self.offsets, &self.x, &self.y), serializer)
     }
 }
 
 impl BorshSerialize for GeometryRef<'_> {
     fn serialize<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        BorshSerialize::serialize(&Ser(self.buf, self.column_x, self.column_y), writer)
+        BorshSerialize::serialize(&Ser(self.buf, &self.offsets, &self.x, &self.y), writer)
     }
 }
 
 impl<'de> Deserialize<'de> for Geometry {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: Deserializer<'de> {
-        let De(buf, x, y) = Deserialize::deserialize(deserializer)?;
+        let De(buf, offsets, x, y) = Deserialize::deserialize(deserializer)?;
 
         Ok(Geometry {
             buf,
-            column_x: Buffer::from(x),
-            column_y: Buffer::from(y),
+            offsets: Buffer::from(offsets),
+            x: Buffer::from(x),
+            y: Buffer::from(y),
         })
     }
 }
 
 impl BorshDeserialize for Geometry {
     fn deserialize_reader<R: Read>(reader: &mut R) -> io::Result<Self> {
-        let De(buf, x, y) = BorshDeserialize::deserialize_reader(reader)?;
+        let De(buf, offsets, x, y) = BorshDeserialize::deserialize_reader(reader)?;
 
         Ok(Geometry {
             buf,
-            column_x: Buffer::from(x),
-            column_y: Buffer::from(y),
+            offsets: Buffer::from(offsets),
+            x: Buffer::from(x),
+            y: Buffer::from(y),
         })
     }
 }

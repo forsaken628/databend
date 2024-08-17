@@ -28,6 +28,7 @@ use super::ARROW_EXT_TYPE_GEOGRAPHY;
 use super::ARROW_EXT_TYPE_GEOMETRY;
 use super::ARROW_EXT_TYPE_VARIANT;
 use crate::types::decimal::DecimalColumn;
+use crate::types::geography::GeographyColumn;
 use crate::types::DecimalDataType;
 use crate::types::NumberColumn;
 use crate::types::NumberDataType;
@@ -170,13 +171,17 @@ fn table_type_to_arrow_type(ty: &TableDataType) -> ArrowDataType {
             Box::new(ArrowDataType::Struct(vec![
                 ArrowField::new("buf", ArrowDataType::LargeBinary, false),
                 ArrowField::new(
-                    "points",
+                    "polygon",
                     ArrowDataType::LargeList(Box::new(ArrowField::new(
-                        "point",
-                        ArrowDataType::Struct(vec![
-                            ArrowField::new("x", ArrowDataType::Float64, false),
-                            ArrowField::new("y", ArrowDataType::Float64, false),
-                        ]),
+                        "ring",
+                        ArrowDataType::LargeList(Box::new(ArrowField::new(
+                            "coord",
+                            ArrowDataType::Struct(vec![
+                                ArrowField::new("x", ArrowDataType::Float64, false),
+                                ArrowField::new("y", ArrowDataType::Float64, false),
+                            ]),
+                            false,
+                        ))),
                         false,
                     ))),
                     false,
@@ -360,59 +365,14 @@ impl Column {
                 )
                 .unwrap(),
             ),
-            Column::Geography(col) => {
-                use databend_common_arrow::arrow::array;
-                let arr_buf = Column::Binary(col.buf.clone()).as_arrow();
-
-                let arr_lon = Box::new(
-                    array::PrimitiveArray::<f64>::try_new(
-                        ArrowDataType::Float64,
-                        col.lon.clone(),
-                        None,
-                    )
-                    .unwrap(),
-                );
-                let arr_lat = Box::new(
-                    array::PrimitiveArray::<f64>::try_new(
-                        ArrowDataType::Float64,
-                        col.lat.clone(),
-                        None,
-                    )
-                    .unwrap(),
-                );
-                let arr_point = Box::new(
-                    array::StructArray::try_new(
-                        ArrowDataType::Struct(vec![
-                            ArrowField::new("x", ArrowDataType::Float64, false),
-                            ArrowField::new("y", ArrowDataType::Float64, false),
-                        ]),
-                        vec![arr_lon, arr_lat],
-                        None,
-                    )
-                    .unwrap(),
-                );
-
-                let point_offsets: Buffer<i64> =
-                    col.offsets.iter().map(|offset| *offset as i64).collect();
-                let arr_list_point = Box::new(
-                    array::ListArray::<i64>::try_new(
-                        ArrowDataType::LargeList(Box::new(ArrowField::new(
-                            "point",
-                            arr_point.data_type().clone(),
-                            false,
-                        ))),
-                        unsafe { OffsetsBuffer::new_unchecked(point_offsets) },
-                        arr_point,
-                        None,
-                    )
-                    .unwrap(),
-                );
-
-                Box::new(
-                    array::StructArray::try_new(arrow_type, vec![arr_buf, arr_list_point], None)
-                        .unwrap(),
+            Column::Geography(col) => Box::new(
+                databend_common_arrow::arrow::array::StructArray::try_new(
+                    arrow_type,
+                    geog_as_array(col),
+                    None,
                 )
-            }
+                .unwrap(),
+            ),
             Column::Array(col) => {
                 let offsets: Buffer<i64> =
                     col.offsets.iter().map(|offset| *offset as i64).collect();
@@ -491,4 +451,69 @@ pub fn set_validities(
         ArrowDataType::Extension(_, t, _) if **t == ArrowDataType::Null => arrow_array.clone(),
         _ => arrow_array.with_validity(Some(validity.clone())),
     }
+}
+
+fn geog_as_array(col: &GeographyColumn) -> Vec<Box<dyn Array>> {
+    use databend_common_arrow::arrow::array;
+
+    let pair = &col.0;
+    let buf = Column::Binary(pair.0.clone()).as_arrow();
+    let polygon = &pair.1;
+
+    let ring = &polygon.values;
+    let ring_offsets: Buffer<i64> = ring.offsets.iter().map(|offset| *offset as i64).collect();
+
+    let coord = &ring.values;
+    let lon = unsafe { std::mem::transmute::<Buffer<F64>, Buffer<f64>>(coord.0.clone()) };
+    let lon =
+        Box::new(array::PrimitiveArray::<f64>::try_new(ArrowDataType::Float64, lon, None).unwrap());
+    let lat = unsafe { std::mem::transmute::<Buffer<F64>, Buffer<f64>>(coord.1.clone()) };
+    let lat =
+        Box::new(array::PrimitiveArray::<f64>::try_new(ArrowDataType::Float64, lat, None).unwrap());
+    let coord = Box::new(
+        array::StructArray::try_new(
+            ArrowDataType::Struct(vec![
+                ArrowField::new("x", ArrowDataType::Float64, false),
+                ArrowField::new("y", ArrowDataType::Float64, false),
+            ]),
+            vec![lon, lat],
+            None,
+        )
+        .unwrap(),
+    );
+
+    let ring = Box::new(
+        array::ListArray::<i64>::try_new(
+            ArrowDataType::LargeList(Box::new(ArrowField::new(
+                "coord",
+                coord.data_type().clone(),
+                false,
+            ))),
+            unsafe { OffsetsBuffer::new_unchecked(ring_offsets) },
+            coord,
+            None,
+        )
+        .unwrap(),
+    );
+
+    let polygon_offsets: Buffer<i64> = polygon
+        .offsets
+        .iter()
+        .map(|offset| *offset as i64)
+        .collect();
+    let polygon = Box::new(
+        array::ListArray::<i64>::try_new(
+            ArrowDataType::LargeList(Box::new(ArrowField::new(
+                "ring",
+                ring.data_type().clone(),
+                false,
+            ))),
+            unsafe { OffsetsBuffer::new_unchecked(polygon_offsets) },
+            ring,
+            None,
+        )
+        .unwrap(),
+    );
+
+    vec![buf, polygon]
 }

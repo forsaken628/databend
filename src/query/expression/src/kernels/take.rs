@@ -25,6 +25,9 @@ use crate::types::array::ArrayColumnBuilder;
 use crate::types::binary::BinaryColumn;
 use crate::types::bitmap::BitmapType;
 use crate::types::decimal::DecimalColumn;
+use crate::types::geography::GeographyColumn;
+use crate::types::geography::PairColumn;
+use crate::types::geography::PolygonType;
 use crate::types::geometry::GeometryType;
 use crate::types::map::KvColumnBuilder;
 use crate::types::nullable::NullableColumn;
@@ -200,12 +203,13 @@ impl Column {
             )),
             Column::Geography(column) => {
                 let num_rows = indices.len();
-                let mut builder = GeographyType::create_builder(num_rows, &[]);
+                let mut builder = PolygonType::create_builder(num_rows, &[]);
                 for index in indices.iter() {
-                    let data = unsafe { column.index_unchecked(index.to_usize()) };
+                    let data = unsafe { column.0.1.index_unchecked(index.to_usize()) };
                     builder.push(data);
                 }
-                GeographyType::upcast_column(GeographyType::build_column(builder))
+                let buf = Self::take_binary_types(&column.0.0, indices, string_items_buf.as_mut());
+                GeographyType::upcast_column(GeographyColumn(PairColumn(buf, builder.build())))
             }
         }
     }

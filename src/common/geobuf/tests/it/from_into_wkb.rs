@@ -56,7 +56,10 @@ fn test_wkb() {
     );
     run_wkb(
         "GEOMETRYCOLLECTION(POLYGON((-10 0,0 10,10 0,-10 0)),GEOMETRYCOLLECTION(LINESTRING(40 60,50 50,60 40),POINT(99 11)),POINT(50 70))",
-    )
+    );
+    run_wkb(
+        "GEOMETRYCOLLECTION(POINT(99 11),MULTIPOLYGON(((-10 0,0 10,10 0,-10 0)),((-10 40,10 40,0 20,-10 40))),MULTIPOLYGON(((-12 0,3 10,10 0,-10 0)),((-10 40,50 40,0 20,-10 40))))",
+    );
 }
 
 fn run_wkb(want: &str) {

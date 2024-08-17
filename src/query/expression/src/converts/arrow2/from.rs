@@ -782,59 +782,7 @@ impl Column {
                         unsafe { std::mem::transmute::<Buffer<i64>, Buffer<u64>>(offsets) };
                     Column::Geometry(BinaryColumn::new(arrow_col.values().clone(), offsets))
                 }
-                (DataType::Geography, ArrowDataType::Struct(_)) => {
-                    use databend_common_arrow::arrow::array;
-
-                    let struct_col = arrow_col
-                        .as_any()
-                        .downcast_ref::<array::StructArray>()
-                        .expect(
-                            "fail to read `Geography` from arrow: array should be `StructArray`",
-                        )
-                        .values();
-
-                    let buf: &array::BinaryArray<i64> = struct_col[0]
-                        .as_any()
-                        .downcast_ref()
-                        .expect("fail to read `Geography`.buf from arrow");
-
-                    let buf_offsets = buf.offsets().clone().into_inner();
-                    let buf_offsets =
-                        unsafe { std::mem::transmute::<Buffer<i64>, Buffer<u64>>(buf_offsets) };
-                    let buf = BinaryColumn::new(buf.values().clone(), buf_offsets);
-
-                    let points: &array::ListArray<i64> = struct_col[1]
-                        .as_any()
-                        .downcast_ref()
-                        .expect("fail to read `Geography`.points from arrow");
-
-                    let offsets = points.offsets().clone().into_inner();
-                    let offsets =
-                        unsafe { std::mem::transmute::<Buffer<i64>, Buffer<u64>>(offsets) };
-
-                    let point = points
-                        .values()
-                        .as_any()
-                        .downcast_ref::<array::StructArray>()
-                        .expect("fail to read `Geography`.point from arrow")
-                        .values();
-
-                    let lon: &array::Float64Array = point[0]
-                        .as_any()
-                        .downcast_ref()
-                        .expect("fail to read `Geography`.lon from arrow");
-                    let lat: &array::Float64Array = point[1]
-                        .as_any()
-                        .downcast_ref()
-                        .expect("fail to read `Geography`.lat from arrow");
-
-                    Column::Geography(GeographyColumn {
-                        buf,
-                        offsets,
-                        lon: lon.values().clone(),
-                        lat: lat.values().clone(),
-                    })
-                }
+                (DataType::Geography, ArrowDataType::Struct(_)) => geog_from_array(arrow_col),
                 (data_type, ArrowDataType::Extension(_, arrow_type, _)) => {
                     from_arrow_with_arrow_type(arrow_col, arrow_type, data_type)?
                 }
@@ -857,4 +805,67 @@ impl Column {
 
         from_arrow_with_arrow_type(arrow_col, arrow_col.data_type(), data_type)
     }
+}
+
+fn geog_from_array(array: &dyn databend_common_arrow::arrow::array::Array) -> Column {
+    use databend_common_arrow::arrow::array;
+
+    let pair = array
+        .as_any()
+        .downcast_ref::<array::StructArray>()
+        .expect("fail to read `Geography` from arrow")
+        .values();
+
+    let buf: &array::BinaryArray<i64> = pair[0]
+        .as_any()
+        .downcast_ref()
+        .expect("fail to read `Geography`.buf from arrow");
+
+    let buf_offsets = buf.offsets().clone().into_inner();
+    let buf_offsets = unsafe { std::mem::transmute::<Buffer<i64>, Buffer<u64>>(buf_offsets) };
+    let buf = BinaryColumn::new(buf.values().clone(), buf_offsets);
+
+    let polygon: &array::ListArray<i64> = pair[1]
+        .as_any()
+        .downcast_ref()
+        .expect("fail to read `Geography`.polygon from arrow");
+
+    let polygon_offsets = polygon.offsets().clone().into_inner();
+    let polygon_offsets =
+        unsafe { std::mem::transmute::<Buffer<i64>, Buffer<u64>>(polygon_offsets) };
+
+    let ring = polygon
+        .values()
+        .as_any()
+        .downcast_ref::<array::ListArray<i64>>()
+        .expect("fail to read `Geography`.ring from arrow");
+
+    let ring_offsets = ring.offsets().clone().into_inner();
+    let ring_offsets = unsafe { std::mem::transmute::<Buffer<i64>, Buffer<u64>>(ring_offsets) };
+
+    let coord = ring
+        .values()
+        .as_any()
+        .downcast_ref::<array::StructArray>()
+        .expect("fail to read `Geography`.coord from arrow")
+        .values();
+
+    let lon: &array::Float64Array = coord[0]
+        .as_any()
+        .downcast_ref()
+        .expect("fail to read `Geography`.lon from arrow");
+    let lon = unsafe { std::mem::transmute::<Buffer<f64>, Buffer<F64>>(lon.values().clone()) };
+    let lat: &array::Float64Array = coord[1]
+        .as_any()
+        .downcast_ref()
+        .expect("fail to read `Geography`.lat from arrow");
+    let lat = unsafe { std::mem::transmute::<Buffer<f64>, Buffer<F64>>(lat.values().clone()) };
+
+    Column::Geography(GeographyColumn::new(
+        buf,
+        lon,
+        lat,
+        ring_offsets,
+        polygon_offsets,
+    ))
 }

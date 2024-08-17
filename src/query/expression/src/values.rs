@@ -1957,7 +1957,7 @@ impl ColumnBuilder {
                 GeometryType::push_item_repeat(builder, value, n);
             }
             (ColumnBuilder::Geography(builder), ScalarRef::Geography(value)) => {
-                GeographyType::push_item_repeat(builder, *value, n);
+                GeographyType::push_item_repeat(builder, value.clone(), n);
             }
             (builder, scalar) => unreachable!("unable to push {scalar:?} to {builder:?}"),
         };
