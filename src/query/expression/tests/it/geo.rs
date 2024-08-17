@@ -19,25 +19,54 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use arrow_array::Array;
+use arrow_array::ArrayAccessor;
 use arrow_buffer::NullBuffer;
 use databend_common_expression::types::geography::Geography;
 use databend_common_expression::types::geography::GeographyColumn;
 use databend_common_expression::types::geography::GeographyColumnBuilder;
 use databend_common_expression::types::geography::GeographyRef;
 use databend_common_expression::types::DataType;
-use databend_common_expression::types::GeographyType;
 use databend_common_geobuf::Ewkb;
 use databend_common_geobuf::FeatureKind;
 use databend_common_geobuf::ObjectKind;
+use databend_common_geobuf::Wkb;
 use geoarrow::algorithm::native::bounding_rect::BoundingRect;
 use geoarrow::algorithm::native::TotalBounds;
 use geoarrow::array::MixedGeometryArray;
 use geoarrow::geo_traits::*;
 use geoarrow::trait_::*;
 use geoarrow::GeometryArrayTrait;
-use ordered_float::OrderedFloat;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use test::Bencher;
+
+// test geo::bench_wkb_to_geobuf        ... bench: 338,992,675.50 ns/iter (+/- 30,080,487.62)
+#[bench]
+fn bench_wkb_to_geobuf(b: &mut Bencher) {
+    let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
+    let file = std::fs::File::open(path).unwrap();
+
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let reader = reader.map(|batch| {
+        let batch = batch.unwrap();
+        let geometry = batch.column_by_name("geometry").unwrap();
+        geometry
+            .as_any()
+            .downcast_ref::<arrow_array::BinaryArray>()
+            .unwrap()
+            .clone()
+    });
+    let all: Vec<_> = reader.collect();
+
+    b.iter(|| {
+        for arr in &all {
+            let _ = wkb_to_geobuf(arr);
+        }
+    })
+}
 
 #[test]
 fn test_geobuf() {
@@ -82,11 +111,12 @@ fn test_geobuf() {
     )
 }
 
+// test geo::bench_geobuf_load          ... bench: 603,078,927.40 ns/iter (+/- 45,899,069.17)
 // test geo::bench_geobuf_load     ... bench: 557,991,343.70 ns/iter (+/- 59,629,855.83)
 // load 解析 wbk，然后构造 geobuf。这里的慢是符合预期的，因为把 offset 写入 buf 会引起更多的扩容
 #[bench]
 fn bench_geobuf_load(b: &mut Bencher) {
-    b.iter(|| load_geobuf())
+    b.iter(load_geobuf)
 }
 
 #[test]
@@ -123,7 +153,6 @@ fn bench_geobuf_write_parquet(b: &mut Bencher) {
     })
 }
 
-// test geo::bench_geobuf_read_parquet  ... bench: 123,843,012.80 ns/iter (+/- 15,347,599.03)
 #[test]
 fn test_geobuf_read_parquet() {
     let all = load_geobuf();
@@ -149,6 +178,7 @@ fn test_geobuf_read_parquet() {
     std::fs::remove_file(&filename).unwrap();
 }
 
+// test geo::bench_geobuf_read_parquet  ... bench: 123,843,012.80 ns/iter (+/- 15,347,599.03)
 #[bench]
 fn bench_geobuf_read_parquet(b: &mut Bencher) {
     let all = load_geobuf();
@@ -201,7 +231,7 @@ fn test_geoarrow() {
 // test geo::bench_geoarrow_load   ... bench: 325,833,397.10 ns/iter (+/- 20,798,587.56)
 #[bench]
 fn bench_geoarrow_load(b: &mut Bencher) {
-    b.iter(|| load_geoarrow())
+    b.iter(load_geoarrow)
 }
 
 // https://github.com/apache/arrow-rs/issues/73
@@ -268,7 +298,7 @@ fn bench_geoarrow_center(b: &mut Bencher) {
     })
 }
 
-// test geo::bench_geobuf_center        ... bench: 198,691,379.40 ns/iter (+/- 20,268,612.92)
+// test geo::bench_geobuf_center        ... bench: 191,621,676.90 ns/iter (+/- 13,550,758.75)
 // 这个算法那么简单没道理不用原生实现啊，不就是先算bbox，然后算中点么？根本没必要构造geometry，bbox可以直接算的。
 #[bench]
 fn bench_geobuf_center(b: &mut Bencher) {
@@ -304,7 +334,7 @@ fn bench_wkb_center(b: &mut Bencher) {
 
 fn load_geobuf() -> Vec<GeographyColumn> {
     let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
-    let file = std::fs::File::open(&path).unwrap();
+    let file = std::fs::File::open(path).unwrap();
 
     let reader = ParquetRecordBatchReaderBuilder::try_new(file)
         .unwrap()
@@ -319,7 +349,7 @@ fn load_geobuf() -> Vec<GeographyColumn> {
             .downcast_ref::<arrow_array::BinaryArray>()
             .unwrap();
 
-        wbk_to_geobuf(&geometry)
+        wkb_to_geobuf(geometry)
     });
     reader.collect()
 }
@@ -362,7 +392,7 @@ fn read_geobuf(filename: &str) -> Vec<GeographyColumn> {
     reader.collect()
 }
 
-fn wbk_to_geobuf(arr: &arrow_array::BinaryArray) -> GeographyColumn {
+fn wkb_to_geobuf(arr: &arrow_array::BinaryArray) -> GeographyColumn {
     assert!(!arr.is_nullable());
     let mut builder = GeographyColumnBuilder::with_capacity(arr.len(), arr.len());
     for data in arr.iter() {
@@ -378,8 +408,8 @@ fn wbk_to_geobuf(arr: &arrow_array::BinaryArray) -> GeographyColumn {
 }
 
 fn total_bounds(col: &GeographyColumn) -> BoundingRect {
-    let lon = unsafe { std::mem::transmute::<&[f64], &[OrderedFloat<f64>]>(col.lon()) };
-    let lat = unsafe { std::mem::transmute::<&[f64], &[OrderedFloat<f64>]>(col.lat()) };
+    let lon = col.lon();
+    let lat = col.lat();
     BoundingRect {
         minx: **lon.iter().min().unwrap(),
         miny: **lat.iter().min().unwrap(),
@@ -396,7 +426,7 @@ struct Statist {
 
 fn load_geoarrow() -> Vec<MixedGeometryArray<i64, 2>> {
     let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
-    let file = std::fs::File::open(&path).unwrap();
+    let file = std::fs::File::open(path).unwrap();
 
     let reader = ParquetRecordBatchReaderBuilder::try_new(file)
         .unwrap()
@@ -411,14 +441,14 @@ fn load_geoarrow() -> Vec<MixedGeometryArray<i64, 2>> {
             .downcast_ref::<arrow_array::BinaryArray>()
             .unwrap();
 
-        wbk_to_mixed(&geometry)
+        wbk_to_mixed(geometry)
     });
     reader.collect()
 }
 
 fn load_wkb() -> Vec<geoarrow::array::WKBArray<i32>> {
     let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
-    let file = std::fs::File::open(&path).unwrap();
+    let file = std::fs::File::open(path).unwrap();
 
     let reader = ParquetRecordBatchReaderBuilder::try_new(file)
         .unwrap()
@@ -481,7 +511,7 @@ fn write_mixed(all: &[MixedGeometryArray<i64, 2>], filename: &str) {
     let file = std::fs::File::create(filename).unwrap();
 
     let field = all[0].data_type().to_field("mixed", false);
-    let schema = Arc::new(arrow_schema::Schema::new([Arc::new(field.into())]));
+    let schema = Arc::new(arrow_schema::Schema::new([Arc::new(field)]));
 
     let mut writer = parquet::arrow::ArrowWriter::try_new(file, schema.clone(), None).unwrap();
 
@@ -542,7 +572,10 @@ impl geoarrow::trait_::GeometryArrayTrait for Column {
         geoarrow::array::CoordType::Separated
     }
 
-    fn to_coord_type(&self, coord_type: geoarrow::array::CoordType) -> Arc<dyn GeometryArrayTrait> {
+    fn to_coord_type(
+        &self,
+        _coord_type: geoarrow::array::CoordType,
+    ) -> Arc<dyn GeometryArrayTrait> {
         todo!()
     }
 
@@ -560,7 +593,7 @@ impl geoarrow::trait_::GeometryArrayTrait for Column {
 
     fn with_metadata(
         &self,
-        metadata: Arc<geoarrow::array::metadata::ArrayMetadata>,
+        _metadata: Arc<geoarrow::array::metadata::ArrayMetadata>,
     ) -> geoarrow::trait_::GeometryArrayRef {
         todo!()
     }
@@ -610,7 +643,7 @@ impl<'a> geoarrow::trait_::GeometryScalarTrait for Scalar<'a> {
     type ScalarGeo = geo::Geometry;
 
     fn to_geo(&self) -> Self::ScalarGeo {
-        let geom = self.0.0;
+        let geom = self.0.0.clone();
         geom.try_into().unwrap()
     }
 
