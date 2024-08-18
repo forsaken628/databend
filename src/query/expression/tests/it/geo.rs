@@ -39,7 +39,7 @@ use geoarrow::GeometryArrayTrait;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use test::Bencher;
 
-// test geo::bench_wkb_to_geobuf        ... bench: 338,992,675.50 ns/iter (+/- 30,080,487.62)
+// test geo::bench_wkb_to_geobuf        ... bench: 201,239,949.20 ns/iter (+/- 11,364,473.79)
 #[bench]
 fn bench_wkb_to_geobuf(b: &mut Bencher) {
     let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
@@ -78,10 +78,10 @@ fn test_geobuf() {
     });
     println!("{statist:?}");
 
-    for (i, part) in all.iter().enumerate() {
-        let bbox = total_bounds(part);
-        println!("row_group:{i} bbox:{bbox:?}")
-    }
+    // for (i, part) in all.iter().enumerate() {
+    //     let bbox = total_bounds(part);
+    //     println!("row_group:{i} bbox:{bbox:?}")
+    // }
 
     let mut point = 0;
     let mut line = 0;
@@ -397,25 +397,30 @@ fn wkb_to_geobuf(arr: &arrow_array::BinaryArray) -> GeographyColumn {
     let mut builder = GeographyColumnBuilder::with_capacity(arr.len(), arr.len());
     for data in arr.iter() {
         if let Some(data) = data {
-            let geometry = Ewkb(data).try_into().unwrap();
-            let geog = Geography(geometry);
-            builder.push(geog.as_ref())
+            builder.push_ewkb(data)
         } else {
             builder.push_default();
         }
     }
-    builder.build()
+    let col = builder.build();
+
+    // for (i, want) in arr.iter().enumerate() {
+    //     let Ewkb::<Vec<u8>>(got) = col.index(i).unwrap().0.try_into().unwrap();
+    //     assert_eq!(want.unwrap(), &got)
+    // }
+    col
 }
 
 fn total_bounds(col: &GeographyColumn) -> BoundingRect {
-    let lon = col.lon();
-    let lat = col.lat();
-    BoundingRect {
-        minx: **lon.iter().min().unwrap(),
-        miny: **lat.iter().min().unwrap(),
-        maxx: **lon.iter().max().unwrap(),
-        maxy: **lat.iter().max().unwrap(),
-    }
+    todo!()
+    // let lon = col.lon();
+    // let lat = col.lat();
+    // BoundingRect {
+    //     minx: **lon.iter().min().unwrap(),
+    //     miny: **lat.iter().min().unwrap(),
+    //     maxx: **lon.iter().max().unwrap(),
+    //     maxy: **lat.iter().max().unwrap(),
+    // }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
