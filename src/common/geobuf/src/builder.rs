@@ -515,6 +515,7 @@ impl<'fbb, 'a> GeometryColumnBuilder<'fbb, 'a> {
         debug_assert_eq!(x.len(), y.len());
         let offset = x.len();
         Self {
+            // todo: make a Allocator pool
             fbb: FlatBufferBuilder::new(),
             coords: CoordRef { x, y, offset },
             point_offsets: Vec::new(),
