@@ -37,7 +37,7 @@ num_cpus = "1.13.1"
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = "0.2.9"
-pprof = { version = "0.11.1", features = [
+pprof = { git = "https://github.com/b41sh/pprof-rs", branch = "fix-panic", features = [
     "flamegraph",
     "protobuf-codec",
     "protobuf",

@@ -3441,6 +3441,7 @@ dependencies = [
  "simdutf8",
  "strength_reduce",
  "terminal_size 0.2.6",
+ "tokio",
  "tonic",
  "typetag",
  "unicode-segmentation",
@@ -7652,7 +7653,7 @@ dependencies = [
  "gix-chunk",
  "gix-features 0.37.2",
  "gix-hash",
- "memmap2 0.9.4",
+ "memmap2",
  "thiserror",
 ]
 
@@ -7666,7 +7667,7 @@ dependencies = [
  "gix-chunk",
  "gix-features 0.38.2",
  "gix-hash",
- "memmap2 0.9.4",
+ "memmap2",
  "thiserror",
 ]
 
@@ -7997,7 +7998,7 @@ dependencies = [
  "gix-traverse 0.36.2",
  "itoa",
  "libc",
- "memmap2 0.9.4",
+ "memmap2",
  "rustix 0.38.31",
  "smallvec",
  "thiserror",
@@ -8025,7 +8026,7 @@ dependencies = [
  "hashbrown 0.14.3",
  "itoa",
  "libc",
- "memmap2 0.9.4",
+ "memmap2",
  "rustix 0.38.31",
  "smallvec",
  "thiserror",
@@ -8183,7 +8184,7 @@ dependencies = [
  "gix-object 0.40.1",
  "gix-path",
  "gix-tempfile 12.0.1",
- "memmap2 0.9.4",
+ "memmap2",
  "parking_lot 0.12.1",
  "smallvec",
  "thiserror",
@@ -8203,7 +8204,7 @@ dependencies = [
  "gix-object 0.42.2",
  "gix-path",
  "gix-tempfile 14.0.0",
- "memmap2 0.9.4",
+ "memmap2",
  "parking_lot 0.12.1",
  "smallvec",
  "thiserror",
@@ -8290,7 +8291,7 @@ dependencies = [
  "gix-path",
  "gix-tempfile 12.0.1",
  "gix-validate",
- "memmap2 0.9.4",
+ "memmap2",
  "thiserror",
  "winnow 0.5.40",
 ]
@@ -8312,7 +8313,7 @@ dependencies = [
  "gix-tempfile 14.0.0",
  "gix-utils",
  "gix-validate",
- "memmap2 0.9.4",
+ "memmap2",
  "thiserror",
  "winnow 0.6.5",
 ]
@@ -10431,15 +10432,6 @@ dependencies = [
 
 [[package]]
 name = "memmap2"
-version = "0.5.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83faa42c0a078c393f6b29d5db232d8be22776a891f8f56e5284faee4a20b327"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "memmap2"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe751422e4a8caa417e13c3ea66452215d7d63e19e604f4980461212f3ae1322"
@@ -12136,9 +12128,8 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
 name = "pprof"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "196ded5d4be535690899a4631cc9f18cdc41b7ebf24a79400f46f48e49a11059"
+version = "0.13.0"
+source = "git+https://github.com/b41sh/pprof-rs?branch=fix-panic#55c81bb969b496fd70b2e4a458010a09e9846d49"
 dependencies = [
  "backtrace",
  "cfg-if 1.0.0",
@@ -14870,21 +14861,21 @@ dependencies = [
 
 [[package]]
 name = "symbolic-common"
-version = "10.2.1"
+version = "12.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b55cdc318ede251d0957f07afe5fed912119b8c1bc5a7804151826db999e737"
+checksum = "16629323a4ec5268ad23a575110a724ad4544aae623451de600c747bf87b36cf"
 dependencies = [
  "debugid",
- "memmap2 0.5.10",
+ "memmap2",
  "stable_deref_trait",
  "uuid",
 ]
 
 [[package]]
 name = "symbolic-demangle"
-version = "10.2.1"
+version = "12.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79be897be8a483a81fff6a3a4e195b4ac838ef73ca42d348b3f722da9902e489"
+checksum = "48c043a45f08f41187414592b3ceb53fb0687da57209cc77401767fb69d5b596"
 dependencies = [
  "cpp_demangle",
  "rustc-demangle",
@@ -15044,7 +15035,7 @@ dependencies = [
  "lru",
  "lz4_flex",
  "measure_time",
- "memmap2 0.9.4",
+ "memmap2",
  "num_cpus",
  "once_cell",
  "oneshot",

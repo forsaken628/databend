@@ -86,7 +86,11 @@ pub fn append_ewkb_to_column<B>(
 where
     B: AsRef<[u8]>,
 {
+    let data = ewkb.0.as_ref();
+    let num = data.len() / 16;
+    x.reserve(num);
+    y.reserve(num);
     let mut builder = GeometryColumnBuilder::new_with_column(x, y);
-    geozero::wkb::Ewkb(ewkb.0.as_ref()).process_geom(&mut builder)?;
+    geozero::wkb::Ewkb(data).process_geom(&mut builder)?;
     Ok(builder.build_buf())
 }

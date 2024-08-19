@@ -21,6 +21,7 @@ use std::time::SystemTime;
 use arrow_array::Array;
 use arrow_array::ArrayAccessor;
 use arrow_buffer::NullBuffer;
+use databend_common_base::base::Profiling;
 use databend_common_expression::types::geography::Geography;
 use databend_common_expression::types::geography::GeographyColumn;
 use databend_common_expression::types::geography::GeographyColumnBuilder;
@@ -29,7 +30,6 @@ use databend_common_expression::types::DataType;
 use databend_common_geobuf::Ewkb;
 use databend_common_geobuf::FeatureKind;
 use databend_common_geobuf::ObjectKind;
-use databend_common_geobuf::Wkb;
 use geoarrow::algorithm::native::bounding_rect::BoundingRect;
 use geoarrow::algorithm::native::TotalBounds;
 use geoarrow::array::MixedGeometryArray;
@@ -39,6 +39,8 @@ use geoarrow::GeometryArrayTrait;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use test::Bencher;
 
+// 456958
+// 440 ns/row
 // test geo::bench_wkb_to_geobuf        ... bench: 201,239,949.20 ns/iter (+/- 11,364,473.79)
 #[bench]
 fn bench_wkb_to_geobuf(b: &mut Bencher) {
@@ -65,7 +67,78 @@ fn bench_wkb_to_geobuf(b: &mut Bencher) {
         for arr in &all {
             let _ = wkb_to_geobuf(arr);
         }
+    });
+}
+
+// 144 ns/row
+// test geo::bench_wkb_to_geoarrow      ... bench:  66,169,499.00 ns/iter (+/- 13,001,331.82)
+#[bench]
+fn bench_wkb_to_geoarrow(b: &mut Bencher) {
+    let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
+    let file = std::fs::File::open(path).unwrap();
+
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let reader = reader.map(|batch| {
+        let batch = batch.unwrap();
+        let geometry = batch.column_by_name("geometry").unwrap();
+        geometry
+            .as_any()
+            .downcast_ref::<arrow_array::BinaryArray>()
+            .unwrap()
+            .clone()
+    });
+    let all: Vec<_> = reader.collect();
+
+    b.iter(|| {
+        for arr in &all {
+            let _ = wkb_to_mixed(arr);
+        }
     })
+}
+
+async fn run_pprof() -> Vec<u8> {
+    Profiling::create(std::time::Duration::from_secs(6), 50)
+        .dump_proto()
+        .await
+        .unwrap()
+}
+
+#[test]
+fn test_aaaaa() {
+    let path = Path::new("tests/it/testdata/hong-kong-latest_nofilter_noclip_compact.parquet");
+    let file = std::fs::File::open(path).unwrap();
+
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let reader = reader.map(|batch| {
+        let batch = batch.unwrap();
+        let geometry = batch.column_by_name("geometry").unwrap();
+        geometry
+            .as_any()
+            .downcast_ref::<arrow_array::BinaryArray>()
+            .unwrap()
+            .clone()
+    });
+    let all: Vec<_> = reader.collect();
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let pprof_handle = rt.spawn(run_pprof());
+
+    for _ in 0..10 {
+        for arr in &all {
+            let _ = wkb_to_geobuf(arr);
+        }
+    }
+
+    let contents = rt.block_on(pprof_handle).unwrap();
+    std::fs::write("pprof.pb", contents).unwrap();
 }
 
 #[test]
@@ -108,12 +181,14 @@ fn test_geobuf() {
     // point 102538 line 189466 polygon 164480 multi_polygon 473 other 1
     println!(
         "point {point} line {line} polygon {polygon} multi_polygon {multi_polygon} other {other}"
-    )
+    );
 }
 
+// 1024 ns/row
+// test geo::bench_geobuf_load          ... bench: 468,106,629.90 ns/iter (+/- 53,823,017.54)
 // test geo::bench_geobuf_load          ... bench: 603,078,927.40 ns/iter (+/- 45,899,069.17)
 // test geo::bench_geobuf_load     ... bench: 557,991,343.70 ns/iter (+/- 59,629,855.83)
-// load 解析 wbk，然后构造 geobuf。这里的慢是符合预期的，因为把 offset 写入 buf 会引起更多的扩容
+// load 解析 wkb，然后构造 geobuf。这里的慢是符合预期的，因为把 offset 写入 buf 会引起更多的扩容
 #[bench]
 fn bench_geobuf_load(b: &mut Bencher) {
     b.iter(load_geobuf)
@@ -228,6 +303,7 @@ fn test_geoarrow() {
     }
 }
 
+// 713 ns/row
 // test geo::bench_geoarrow_load   ... bench: 325,833,397.10 ns/iter (+/- 20,798,587.56)
 #[bench]
 fn bench_geoarrow_load(b: &mut Bencher) {
@@ -257,7 +333,7 @@ fn test_geoarrow_write_parquet() {
 }
 
 // test geo::bench_geoarrow_bounds ... bench:  89,073,962.70 ns/iter (+/- 4,899,218.94)
-// geoarrow 试图兼容所有的情况，交错布局的点，高维的点，wbk这种需要解码的才能访问的也要支持。
+// geoarrow 试图兼容所有的情况，交错布局的点，高维的点，wkb这种需要解码的才能访问的也要支持。
 // 他们的关注点在通用性，在整合各种情况，希望做成一个大而全的东西，而效率则是次要的，所以可以发现实现里面有一大堆抽象，也大量使用宏。
 // 针对一些更具体的场景，很容易想到一些特化的算法，有更高的效率。例如这里算 bbox 就可以快2.5倍。
 // 但是合并进 geoarrow 的体系里面去，需要考虑那些我们完全用不上的功能，感觉没有这个必要。
@@ -446,7 +522,7 @@ fn load_geoarrow() -> Vec<MixedGeometryArray<i64, 2>> {
             .downcast_ref::<arrow_array::BinaryArray>()
             .unwrap();
 
-        wbk_to_mixed(geometry)
+        wkb_to_mixed(geometry)
     });
     reader.collect()
 }
@@ -475,7 +551,7 @@ fn load_wkb() -> Vec<geoarrow::array::WKBArray<i32>> {
     reader.collect()
 }
 
-fn wbk_to_mixed(arr: &arrow_array::BinaryArray) -> MixedGeometryArray<i64, 2> {
+fn wkb_to_mixed(arr: &arrow_array::BinaryArray) -> MixedGeometryArray<i64, 2> {
     let metadata = Arc::new(geoarrow::array::metadata::ArrayMetadata::default());
     let wkb_arr = geoarrow::array::WKBArray::new(arr.clone(), metadata);
 
@@ -487,9 +563,6 @@ fn wbk_to_mixed(arr: &arrow_array::BinaryArray) -> MixedGeometryArray<i64, 2> {
                 let object = wkb.to_wkb_object();
 
                 match object.as_type() {
-                    GeometryType::Point(_) => {
-                        builder.push_geometry(Some(&object)).unwrap();
-                    }
                     GeometryType::GeometryCollection(_) => {
                         // 这一块实现，怎么办还不知道呢。
                         // WARN: not implemented
@@ -500,9 +573,9 @@ fn wbk_to_mixed(arr: &arrow_array::BinaryArray) -> MixedGeometryArray<i64, 2> {
                         // WARN: not implemented
                         // builder.push_null()
                     }
-                    _ => builder
-                        .push_geometry_preferring_multi(Some(&object))
-                        .unwrap(),
+                    _ => {
+                        builder.push_geometry(Some(&object)).unwrap();
+                    }
                 }
             }
             None => builder.push_null(),
