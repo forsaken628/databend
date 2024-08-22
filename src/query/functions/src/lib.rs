@@ -22,6 +22,7 @@
 #![feature(try_blocks)]
 #![feature(downcast_unchecked)]
 #![feature(str_internals)]
+#![feature(trusted_len)]
 
 use aggregates::AggregateFunctionFactory;
 use ctor::ctor;

@@ -3,6 +3,17 @@
 version = 3
 
 [[package]]
+name = "accurate"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f209f0bc218ee6cf50db56ec0d9fe10b3cbfb6f3900d019b36c8fdb6d3bc03e"
+dependencies = [
+ "cfg-if 1.0.0",
+ "ieee754",
+ "num-traits",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -208,7 +219,7 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aef82843a0ec9f8b19567445ad2421ceeb1d711514384bdd3d49fe37102ee13"
 dependencies = [
- "bigdecimal",
+ "bigdecimal 0.4.5",
  "digest",
  "libflate",
  "log",
@@ -224,6 +235,15 @@ dependencies = [
  "thiserror",
  "typed-builder",
  "uuid",
+]
+
+[[package]]
+name = "approx"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f2a05fd1bd10b2527e20a2cd32d8873d115b8b39fe219ee25f42a8aca6ba278"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -1432,6 +1452,18 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 
 [[package]]
 name = "bigdecimal"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6773ddc0eafc0e509fb60e48dff7f450f8e674a0686ae8605e8d9901bd5eefa"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "serde",
+]
+
+[[package]]
+name = "bigdecimal"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51d712318a27c7150326677b321a5fa91b55f6d9034ffd67f20319e147d40cee"
@@ -2097,6 +2129,16 @@ name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
+name = "cgmath"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a98d30140e3296250832bbaaff83b27dcd6fa3cc70fb6f1f3e5c9c0023b5317"
+dependencies = [
+ "approx 0.4.0",
+ "num-traits",
+]
 
 [[package]]
 name = "chrono"
@@ -3480,6 +3522,7 @@ dependencies = [
  "ethnum",
  "geo",
  "geo-types",
+ "geographiclib-rs",
  "geohash",
  "geos",
  "geozero 0.13.0",
@@ -3501,6 +3544,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "roaring",
+ "s2",
  "serde",
  "serde_json",
  "sha1",
@@ -4755,7 +4799,7 @@ dependencies = [
 name = "databend-common-vector"
 version = "0.1.0"
 dependencies = [
- "approx",
+ "approx 0.5.1",
  "databend-common-exception",
  "ndarray",
 ]
@@ -6717,6 +6761,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28a80e3145d8ad11ba0995949bbcf48b9df2be62772b3d351ef017dff6ecb853"
 
 [[package]]
+name = "float_extras"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b22b70f8649ea2315955f1a36d964b0e4da482dfaa5f0d04df0d1fb7c338ab7a"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "float_next_after"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7159,7 +7212,7 @@ version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ff16065e5720f376fbced200a5ae0f47ace85fd70b7e54269790281353b6d61"
 dependencies = [
- "approx",
+ "approx 0.5.1",
  "num-traits",
  "rstar",
  "serde",
@@ -7171,6 +7224,7 @@ version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e5ed84f8089c70234b0a8e0aedb6dc733671612ddc0d37c6066052f9781960"
 dependencies = [
+ "accurate",
  "libm",
 ]
 
@@ -8914,6 +8968,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ieee754"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9007da9cacbd3e6343da136e98b0d2df013f553d35bdec8b518f07bea768e19c"
+
+[[package]]
 name = "im"
 version = "15.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10260,7 +10320,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "478b0ff3f7d67b79da2b96f56f334431aef65e15ba4b29dd74a4236e29582bdc"
 dependencies = [
  "base64 0.21.7",
- "bigdecimal",
+ "bigdecimal 0.4.5",
  "bindgen 0.69.4",
  "bitflags 2.6.0",
  "bitvec",
@@ -13333,6 +13393,20 @@ name = "ryu"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
+
+[[package]]
+name = "s2"
+version = "0.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc7fbc04bb52c40b5f48c9bb2d2961375301916e0c25d9f373750654d588cd5c"
+dependencies = [
+ "bigdecimal 0.3.1",
+ "cgmath",
+ "float_extras",
+ "lazy_static",
+ "libm",
+ "serde",
+]
 
 [[package]]
 name = "salsa20"
