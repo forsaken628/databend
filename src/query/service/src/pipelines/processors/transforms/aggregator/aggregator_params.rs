@@ -97,4 +97,11 @@ impl AggregatorParams {
             .collect_vec();
         DataBlock::new_from_columns(columns)
     }
+
+    pub fn has_async_aggregate_function(&self) -> bool {
+        !self
+            .aggregate_functions
+            .iter()
+            .all(AggregateFunctionRef::is_sync)
+    }
 }

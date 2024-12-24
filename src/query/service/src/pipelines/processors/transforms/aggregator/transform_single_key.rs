@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use std::alloc::Layout;
-use std::borrow::BorrowMut;
 use std::sync::Arc;
 use std::time::Instant;
-use std::vec;
 
+use async_trait::async_trait;
 use bumpalo::Bump;
 use databend_common_base::base::convert_byte_size;
 use databend_common_base::base::convert_number_size;
@@ -40,6 +39,8 @@ use databend_common_pipeline_core::processors::OutputPort;
 use databend_common_pipeline_core::processors::Processor;
 use databend_common_pipeline_transforms::processors::AccumulatingTransform;
 use databend_common_pipeline_transforms::processors::AccumulatingTransformer;
+use databend_common_pipeline_transforms::processors::AsyncAccumulatingTransform;
+use databend_common_pipeline_transforms::processors::AsyncAccumulatingTransformer;
 
 use crate::pipelines::processors::transforms::aggregator::AggregatorParams;
 
@@ -90,53 +91,17 @@ impl PartialSingleStateAggregator {
             bytes: 0,
         })
     }
-}
 
-impl AccumulatingTransform for PartialSingleStateAggregator {
-    const NAME: &'static str = "AggregatorPartialTransform";
-
-    fn transform(&mut self, block: DataBlock) -> Result<Vec<DataBlock>> {
-        if self.first_block_start.is_none() {
-            self.first_block_start = Some(Instant::now());
-        }
-
-        let is_agg_index_block = block
+    fn is_agg_index_block(&self, block: &DataBlock) -> bool {
+        block
             .get_meta()
             .and_then(AggIndexMeta::downcast_ref_from)
             .map(|index| index.is_agg)
-            .unwrap_or_default();
-
-        let block = block.consume_convert_to_full();
-
-        for (idx, func) in self.funcs.iter().enumerate() {
-            let place = self.places[idx];
-            if is_agg_index_block {
-                // Aggregation states are in the back of the block.
-                let agg_index = block.num_columns() - self.funcs.len() + idx;
-                let agg_state = block.get_by_offset(agg_index).value.as_column().unwrap();
-
-                func.as_sync()
-                    .unwrap()
-                    .batch_merge_single(place, agg_state)?;
-            } else {
-                let columns =
-                    InputColumns::new_block_proxy(self.arg_indices[idx].as_slice(), &block);
-                func.as_sync()
-                    .unwrap()
-                    .accumulate(place, columns, None, block.num_rows())?;
-            }
-        }
-
-        self.rows += block.num_rows();
-        self.bytes += block.memory_size();
-
-        Ok(vec![])
+            .unwrap_or_default()
     }
 
-    fn on_finish(&mut self, generate_data: bool) -> Result<Vec<DataBlock>> {
-        let mut generate_data_block = vec![];
-
-        if generate_data {
+    fn on_finish(&mut self, generate_data: bool) -> Result<Option<DataBlock>> {
+        let generate_data_block = if generate_data {
             let mut columns = Vec::with_capacity(self.funcs.len());
 
             for (idx, func) in self.funcs.iter().enumerate() {
@@ -150,8 +115,10 @@ impl AccumulatingTransform for PartialSingleStateAggregator {
                 ));
             }
 
-            generate_data_block = vec![DataBlock::new(columns, 1)];
-        }
+            Some(DataBlock::new(columns, 1))
+        } else {
+            None
+        };
 
         // destroy states
         for (place, func) in self.places.iter().zip(self.funcs.iter()) {
@@ -178,6 +145,112 @@ impl AccumulatingTransform for PartialSingleStateAggregator {
     }
 }
 
+impl AccumulatingTransform for PartialSingleStateAggregator {
+    const NAME: &'static str = "AggregatorPartialTransform";
+
+    fn transform(&mut self, block: DataBlock) -> Result<Vec<DataBlock>> {
+        if self.first_block_start.is_none() {
+            self.first_block_start = Some(Instant::now());
+        }
+
+        let is_agg_index_block = self.is_agg_index_block(&block);
+        let block = block.consume_convert_to_full();
+
+        for (idx, (func, place)) in self
+            .funcs
+            .iter()
+            .zip(self.places.iter().cloned())
+            .enumerate()
+        {
+            if is_agg_index_block {
+                // Aggregation states are in the back of the block.
+                let agg_index = block.num_columns() - self.funcs.len() + idx;
+                let agg_state = block.get_by_offset(agg_index).value.as_column().unwrap();
+
+                func.as_sync()
+                    .unwrap()
+                    .batch_merge_single(place, agg_state)?;
+            } else {
+                let columns =
+                    InputColumns::new_block_proxy(self.arg_indices[idx].as_slice(), &block);
+                func.as_sync()
+                    .unwrap()
+                    .accumulate(place, columns, None, block.num_rows())?;
+            }
+        }
+
+        self.rows += block.num_rows();
+        self.bytes += block.memory_size();
+
+        Ok(vec![])
+    }
+
+    fn on_finish(&mut self, generate_data: bool) -> Result<Vec<DataBlock>> {
+        Ok(self
+            .on_finish(generate_data)?
+            .map(|block| vec![block])
+            .unwrap_or_default())
+    }
+}
+
+#[async_trait]
+impl AsyncAccumulatingTransform for PartialSingleStateAggregator {
+    const NAME: &'static str = "AggregatorPartialTransform";
+
+    async fn transform(&mut self, block: DataBlock) -> Result<Option<DataBlock>> {
+        if self.first_block_start.is_none() {
+            self.first_block_start = Some(Instant::now());
+        }
+
+        let is_agg_index_block = self.is_agg_index_block(&block);
+        let block = block.consume_convert_to_full();
+
+        for (idx, (func, place)) in self
+            .funcs
+            .iter()
+            .zip(self.places.iter().cloned())
+            .enumerate()
+        {
+            if is_agg_index_block {
+                // Aggregation states are in the back of the block.
+                let agg_index = block.num_columns() - self.funcs.len() + idx;
+                let agg_state = block.get_by_offset(agg_index).value.as_column().unwrap();
+
+                match func {
+                    AggregateFunctionRef::Sync(func) => {
+                        func.batch_merge_single(place, agg_state)?;
+                    }
+                    AggregateFunctionRef::Async(func) => {
+                        let agg_state = vec![agg_state.clone()];
+                        func.batch_merge_single(place, &agg_state).await? // todo parallelism
+                    }
+                }
+            } else {
+                let columns =
+                    InputColumns::new_block_proxy(self.arg_indices[idx].as_slice(), &block);
+                match func {
+                    AggregateFunctionRef::Sync(func) => {
+                        func.accumulate(place, columns, None, block.num_rows())?;
+                    }
+                    AggregateFunctionRef::Async(func) => {
+                        func.accumulate(place, columns, None, block.num_rows())
+                            .await? // todo parallelism
+                    }
+                }
+            }
+        }
+
+        self.rows += block.num_rows();
+        self.bytes += block.memory_size();
+
+        Ok(None)
+    }
+
+    async fn on_finish(&mut self, generate_data: bool) -> Result<Option<DataBlock>> {
+        self.on_finish(generate_data)
+    }
+}
+
 /// SELECT COUNT | SUM FROM table;
 pub struct FinalSingleStateAggregator {
     arena: Bump,
@@ -200,17 +273,19 @@ impl FinalSingleStateAggregator {
             .layout
             .ok_or_else(|| ErrorCode::LayoutError("layout shouldn't be None"))?;
 
-        Ok(AccumulatingTransformer::create(
-            input,
-            output,
-            FinalSingleStateAggregator {
-                arena,
-                layout,
-                funcs: params.aggregate_functions.clone(),
-                to_merge_data: vec![vec![]; params.aggregate_functions.len()],
-                offsets_aggregate_states: params.offsets_aggregate_states.clone(),
-            },
-        ))
+        let inner = FinalSingleStateAggregator {
+            arena,
+            layout,
+            funcs: params.aggregate_functions.clone(),
+            to_merge_data: vec![vec![]; params.aggregate_functions.len()],
+            offsets_aggregate_states: params.offsets_aggregate_states.clone(),
+        };
+
+        if params.has_async_aggregate_function() {
+            Ok(AsyncAccumulatingTransformer::create(input, output, inner))
+        } else {
+            Ok(AccumulatingTransformer::create(input, output, inner))
+        }
     }
 
     fn new_places(&self) -> Vec<StateAddr> {
@@ -225,12 +300,8 @@ impl FinalSingleStateAggregator {
             })
             .collect()
     }
-}
 
-impl AccumulatingTransform for FinalSingleStateAggregator {
-    const NAME: &'static str = "AggregatorFinalTransform";
-
-    fn transform(&mut self, block: DataBlock) -> Result<Vec<DataBlock>> {
+    fn transform(&mut self, block: DataBlock) -> Result<()> {
         if !block.is_empty() {
             let block = block.consume_convert_to_full();
 
@@ -240,49 +311,115 @@ impl AccumulatingTransform for FinalSingleStateAggregator {
             }
         }
 
+        Ok(())
+    }
+}
+
+impl AccumulatingTransform for FinalSingleStateAggregator {
+    const NAME: &'static str = "AggregatorFinalTransform";
+
+    fn transform(&mut self, block: DataBlock) -> Result<Vec<DataBlock>> {
+        self.transform(block)?;
         Ok(vec![])
     }
 
     fn on_finish(&mut self, generate_data: bool) -> Result<Vec<DataBlock>> {
-        let mut generate_data_block = vec![];
-
-        if generate_data {
-            let mut aggr_values = {
-                let mut builders = vec![];
-                for func in &self.funcs {
-                    let data_type = func.return_type()?;
-                    builders.push(ColumnBuilder::with_capacity(&data_type, 1));
-                }
-                builders
-            };
-
-            let main_places = self.new_places();
-            for (index, func) in self.funcs.iter().enumerate() {
-                let main_place = main_places[index];
-                for col in self.to_merge_data[index].iter() {
-                    func.as_sync()
-                        .unwrap()
-                        .batch_merge_single(main_place, col)?;
-                }
-                let array = aggr_values[index].borrow_mut();
-                func.as_sync().unwrap().merge_result(main_place, array)?;
-            }
-
-            let mut columns = Vec::with_capacity(self.funcs.len());
-            for builder in aggr_values {
-                columns.push(builder.build());
-            }
-
-            // destroy states
-            for (place, func) in main_places.iter().zip(self.funcs.iter()) {
-                if func.need_manual_drop_state() {
-                    unsafe { func.drop_state(*place) }
-                }
-            }
-
-            generate_data_block = vec![DataBlock::new_from_columns(columns)];
+        if !generate_data {
+            return Ok(vec![]);
         }
 
-        Ok(generate_data_block)
+        let main_places = self.new_places();
+        for ((func, main_place), data) in self
+            .funcs
+            .iter()
+            .zip(main_places.iter().cloned())
+            .zip(self.to_merge_data.iter())
+        {
+            for col in data.iter() {
+                func.as_sync()
+                    .unwrap()
+                    .batch_merge_single(main_place, col)?;
+            }
+        }
+
+        let columns = self
+            .funcs
+            .iter()
+            .zip(main_places.iter().cloned())
+            .map(|(func, main_place)| {
+                let data_type = func.return_type()?;
+                let mut builder = ColumnBuilder::with_capacity(&data_type, 1);
+                func.as_sync()
+                    .unwrap()
+                    .merge_result(main_place, &mut builder)?;
+                Ok(builder.build())
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // destroy states
+        for (place, func) in main_places.iter().zip(self.funcs.iter()) {
+            if func.need_manual_drop_state() {
+                unsafe { func.drop_state(*place) }
+            }
+        }
+
+        Ok(vec![DataBlock::new_from_columns(columns)])
+    }
+}
+
+#[async_trait]
+impl AsyncAccumulatingTransform for FinalSingleStateAggregator {
+    const NAME: &'static str = "AggregatorFinalTransform";
+
+    async fn transform(&mut self, block: DataBlock) -> Result<Option<DataBlock>> {
+        self.transform(block)?;
+        Ok(None)
+    }
+
+    async fn on_finish(&mut self, generate_data: bool) -> Result<Option<DataBlock>> {
+        if !generate_data {
+            return Ok(None);
+        }
+
+        let main_places = self.new_places();
+        for ((func, main_place), data) in self
+            .funcs
+            .iter()
+            .zip(main_places.iter().cloned())
+            .zip(self.to_merge_data.iter())
+        {
+            match func {
+                AggregateFunctionRef::Sync(func) => {
+                    for col in data.iter() {
+                        func.batch_merge_single(main_place, col)?;
+                    }
+                }
+                AggregateFunctionRef::Async(func) => {
+                    func.batch_merge_single(main_place, data).await?; // todo parallelism
+                }
+            }
+        }
+
+        let mut columns = Vec::with_capacity(self.funcs.len());
+        for (func, main_place) in self.funcs.iter().zip(main_places.iter().cloned()) {
+            let data_type = func.return_type()?;
+            let mut builder = ColumnBuilder::with_capacity(&data_type, 1);
+            match func {
+                AggregateFunctionRef::Sync(func) => func.merge_result(main_place, &mut builder)?,
+                AggregateFunctionRef::Async(func) => {
+                    func.merge_result(main_place, &mut builder).await? // todo parallelism
+                }
+            }
+            columns.push(builder.build());
+        }
+
+        // destroy states
+        for (place, func) in main_places.iter().zip(self.funcs.iter()) {
+            if func.need_manual_drop_state() {
+                unsafe { func.drop_state(*place) }
+            }
+        }
+
+        Ok(Some(DataBlock::new_from_columns(columns)))
     }
 }

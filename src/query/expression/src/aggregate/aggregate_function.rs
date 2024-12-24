@@ -87,6 +87,8 @@ impl AggregateFunctionRef {
         }
     }
 
+    /// # Safety
+    /// The caller must ensure that the [`_place`] has defined memory.
     pub unsafe fn drop_state(&self, place: StateAddr) {
         match self {
             AggregateFunctionRef::Sync(f) => f.drop_state(place),
@@ -113,10 +115,10 @@ pub trait SyncAggregateFunction: fmt::Display + Sync + Send {
     // common used when there is no group by for aggregate function
     fn accumulate(
         &self,
-        _place: StateAddr,
-        _columns: InputColumns,
-        _validity: Option<&Bitmap>,
-        _input_rows: usize,
+        place: StateAddr,
+        columns: InputColumns,
+        validity: Option<&Bitmap>,
+        input_rows: usize,
     ) -> Result<()>;
 
     // used when we need to calculate with group keys
@@ -203,7 +205,7 @@ pub trait SyncAggregateFunction: fmt::Display + Sync + Send {
         Ok(())
     }
     // TODO append the value into the column builder
-    fn merge_result(&self, _place: StateAddr, _builder: &mut ColumnBuilder) -> Result<()>;
+    fn merge_result(&self, place: StateAddr, builder: &mut ColumnBuilder) -> Result<()>;
 
     // std::mem::needs_drop::<State>
     // if true will call drop_state
@@ -263,11 +265,15 @@ pub trait AsyncAggregateFunction: fmt::Display + Sync + Send {
     /// The caller must ensure that the [`_place`] has defined memory.
     unsafe fn drop_state(&self, _place: StateAddr) {}
 
-    async fn accumulate_keys(
+    async fn batch_merge_single(&self, place: StateAddr, column: &[Column]) -> Result<()>;
+
+    async fn accumulate(
         &self,
-        places: &[StateAddr],
-        offset: usize,
+        place: StateAddr,
         columns: InputColumns,
+        validity: Option<&Bitmap>,
         input_rows: usize,
     ) -> Result<()>;
+
+    async fn merge_result(&self, place: StateAddr, builder: &mut ColumnBuilder) -> Result<()>;
 }

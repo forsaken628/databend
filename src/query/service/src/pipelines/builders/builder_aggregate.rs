@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use databend_common_catalog::table_context::TableContext;
+use databend_common_exception::ErrorCode;
 use databend_common_exception::Result;
 use databend_common_expression::AggregateFunctionRef;
 use databend_common_expression::DataField;
@@ -115,9 +116,22 @@ impl PipelineBuilder {
         )?;
 
         if params.group_columns.is_empty() {
-            return self.main_pipeline.try_add_accumulating_transformer(|| {
-                PartialSingleStateAggregator::try_new(&params)
-            });
+            return if params.has_async_aggregate_function() {
+                self.main_pipeline
+                    .try_add_async_accumulating_transformer(|| {
+                        PartialSingleStateAggregator::try_new(&params)
+                    })
+            } else {
+                self.main_pipeline.try_add_accumulating_transformer(|| {
+                    PartialSingleStateAggregator::try_new(&params)
+                })
+            };
+        }
+
+        if params.has_async_aggregate_function() {
+            return Err(ErrorCode::Unimplemented(
+                "Async aggregate function is unimplemented in partial aggregate with group by",
+            ));
         }
 
         let schema_before_group_by = params.input_schema.clone();
@@ -204,13 +218,17 @@ impl PipelineBuilder {
         if params.group_columns.is_empty() {
             self.build_pipeline(&aggregate.input)?;
             self.main_pipeline.try_resize(1)?;
-            self.main_pipeline.add_transform(|input, output| {
+            return self.main_pipeline.add_transform(|input, output| {
                 Ok(ProcessorPtr::create(
                     FinalSingleStateAggregator::try_create(input, output, &params)?,
                 ))
-            })?;
+            });
+        }
 
-            return Ok(());
+        if params.has_async_aggregate_function() {
+            return Err(ErrorCode::Unimplemented(
+                "Async aggregate function is unimplemented in final aggregate with group by",
+            ));
         }
 
         let old_inject = self.exchange_injector.clone();
