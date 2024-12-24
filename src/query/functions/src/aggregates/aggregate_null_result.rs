@@ -24,7 +24,7 @@ use databend_common_expression::types::ValueType;
 use databend_common_expression::ColumnBuilder;
 use databend_common_expression::InputColumns;
 
-use super::aggregate_function::AggregateFunction;
+use super::aggregate_function::SyncAggregateFunction;
 use super::StateAddr;
 
 #[derive(Clone)]
@@ -33,12 +33,12 @@ pub struct AggregateNullResultFunction {
 }
 
 impl AggregateNullResultFunction {
-    pub fn try_create(data_type: DataType) -> Result<Arc<dyn AggregateFunction>> {
+    pub fn try_create(data_type: DataType) -> Result<Arc<dyn SyncAggregateFunction>> {
         Ok(Arc::new(AggregateNullResultFunction { data_type }))
     }
 }
 
-impl AggregateFunction for AggregateNullResultFunction {
+impl SyncAggregateFunction for AggregateNullResultFunction {
     fn name(&self) -> &str {
         "AggregateNullResultFunction"
     }

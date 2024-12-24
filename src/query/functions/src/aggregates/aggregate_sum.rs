@@ -24,11 +24,11 @@ use databend_common_expression::types::Buffer;
 use databend_common_expression::types::*;
 use databend_common_expression::utils::arithmetics_type::ResultTypeOfUnary;
 use databend_common_expression::with_number_mapped_type;
-use databend_common_expression::AggregateFunctionRef;
 use databend_common_expression::Column;
 use databend_common_expression::ColumnBuilder;
 use databend_common_expression::Scalar;
 use databend_common_expression::StateAddr;
+use databend_common_expression::SyncAggregateFunctionRef;
 use databend_common_expression::SELECTIVITY_THRESHOLD;
 use num_traits::AsPrimitive;
 
@@ -274,7 +274,7 @@ pub fn try_create_aggregate_sum_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_unary_arguments(display_name, arguments.len())?;
 
     let mut data_type = arguments[0].clone();

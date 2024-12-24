@@ -21,7 +21,7 @@ use super::aggregate_null_variadic_adaptor::AggregateNullVariadicAdaptor;
 use super::AggregateNullUnaryAdaptor;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionFeatures;
 use crate::aggregates::aggregate_null_result::AggregateNullResultFunction;
-use crate::aggregates::AggregateFunctionRef;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 #[derive(Clone)]
 pub struct AggregateFunctionCombinatorNull {}
@@ -51,9 +51,9 @@ impl AggregateFunctionCombinatorNull {
         _name: &str,
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
-        nested: AggregateFunctionRef,
+        nested: SyncAggregateFunctionRef,
         properties: AggregateFunctionFeatures,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         // has_null_types
         if !arguments.is_empty() && arguments.iter().any(|f| f == &DataType::Null) {
             if properties.returns_default_when_only_null {

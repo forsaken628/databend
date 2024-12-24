@@ -39,8 +39,8 @@ use super::borsh_serialize_state;
 use super::StateAddr;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionDescription;
 use crate::aggregates::aggregator_common::assert_binary_arguments;
-use crate::aggregates::AggregateFunction;
-use crate::aggregates::AggregateFunctionRef;
+use crate::aggregates::SyncAggregateFunction;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct AggregateCovarianceState {
@@ -135,7 +135,7 @@ pub struct AggregateCovarianceFunction<T0, T1, R> {
     _r: PhantomData<R>,
 }
 
-impl<T0, T1, R> AggregateFunction for AggregateCovarianceFunction<T0, T1, R>
+impl<T0, T1, R> SyncAggregateFunction for AggregateCovarianceFunction<T0, T1, R>
 where
     T0: Number + AsPrimitive<f64>,
     T1: Number + AsPrimitive<f64>,
@@ -269,7 +269,7 @@ where
     pub fn try_create(
         display_name: &str,
         _arguments: Vec<DataType>,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         Ok(Arc::new(Self {
             display_name: display_name.to_string(),
             _t0: PhantomData,
@@ -283,7 +283,7 @@ pub fn try_create_aggregate_covariance<R: AggregateCovariance>(
     display_name: &str,
     _params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_binary_arguments(display_name, arguments.len())?;
 
     with_number_mapped_type!(|NUM_TYPE0| match &arguments[0] {

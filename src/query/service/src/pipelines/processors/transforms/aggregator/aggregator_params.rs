@@ -48,9 +48,9 @@ impl AggregatorParams {
     pub fn try_create(
         input_schema: DataSchemaRef,
         group_data_types: Vec<DataType>,
-        group_columns: &[usize],
-        agg_funcs: &[AggregateFunctionRef],
-        agg_args: &[Vec<usize>],
+        group_columns: Vec<usize>,
+        agg_funcs: Vec<AggregateFunctionRef>,
+        agg_args: Vec<Vec<usize>>,
         enable_experimental_aggregate_hashtable: bool,
         cluster_aggregator: bool,
         max_block_size: usize,
@@ -60,15 +60,15 @@ impl AggregatorParams {
         let mut states_layout = None;
         if !agg_funcs.is_empty() {
             states_offsets = Vec::with_capacity(agg_funcs.len());
-            states_layout = Some(get_layout_offsets(agg_funcs, &mut states_offsets)?);
+            states_layout = Some(get_layout_offsets(&agg_funcs, &mut states_offsets)?);
         }
 
         Ok(Arc::new(AggregatorParams {
             input_schema,
-            group_columns: group_columns.to_vec(),
+            group_columns,
             group_data_types,
-            aggregate_functions: agg_funcs.to_vec(),
-            aggregate_functions_arguments: agg_args.to_vec(),
+            aggregate_functions: agg_funcs,
+            aggregate_functions_arguments: agg_args,
             layout: states_layout,
             offsets_aggregate_states: states_offsets,
             enable_experimental_aggregate_hashtable,

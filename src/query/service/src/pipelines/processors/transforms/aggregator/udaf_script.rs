@@ -36,7 +36,7 @@ use databend_common_expression::DataField;
 use databend_common_expression::DataSchema;
 use databend_common_expression::InputColumns;
 use databend_common_expression::StateAddr;
-use databend_common_functions::aggregates::AggregateFunction;
+use databend_common_functions::aggregates::SyncAggregateFunction;
 use databend_common_sql::plans::UDFLanguage;
 use databend_common_sql::plans::UDFScriptCode;
 
@@ -50,7 +50,7 @@ pub struct AggregateUdfScript {
     init_state: UdfAggState,
 }
 
-impl AggregateFunction for AggregateUdfScript {
+impl SyncAggregateFunction for AggregateUdfScript {
     fn name(&self) -> &str {
         self.runtime.name()
     }
@@ -240,7 +240,7 @@ pub fn create_udaf_script_function(
     state_fields: Vec<DataField>,
     arguments: Vec<DataField>,
     output_type: DataType,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     let UDFScriptCode { language, code, .. } = code;
     let runtime = match language {
         UDFLanguage::JavaScript => {

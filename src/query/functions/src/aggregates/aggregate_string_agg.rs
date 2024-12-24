@@ -33,7 +33,7 @@ use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
 use super::StateAddr;
 use crate::aggregates::assert_variadic_arguments;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct StringAggState {
@@ -46,7 +46,7 @@ pub struct AggregateStringAggFunction {
     delimiter: String,
 }
 
-impl AggregateFunction for AggregateStringAggFunction {
+impl SyncAggregateFunction for AggregateStringAggFunction {
     fn name(&self) -> &str {
         "AggregateStringAggFunction"
     }
@@ -171,7 +171,7 @@ impl fmt::Display for AggregateStringAggFunction {
 }
 
 impl AggregateStringAggFunction {
-    fn try_create(display_name: &str, delimiter: String) -> Result<Arc<dyn AggregateFunction>> {
+    fn try_create(display_name: &str, delimiter: String) -> Result<Arc<dyn SyncAggregateFunction>> {
         let func = AggregateStringAggFunction {
             display_name: display_name.to_string(),
             delimiter,
@@ -184,7 +184,7 @@ pub fn try_create_aggregate_string_agg_function(
     display_name: &str,
     params: Vec<Scalar>,
     argument_types: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_variadic_arguments(display_name, argument_types.len(), (1, 2))?;
     // TODO:(b41sh) support other data types
     if argument_types[0].remove_nullable() != DataType::String {

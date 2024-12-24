@@ -40,7 +40,7 @@ use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
 use super::StateAddr;
 use crate::aggregates::assert_binary_arguments;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 
 pub trait BinaryScalarStateFunc<V: ValueType>:
     BorshSerialize + BorshDeserialize + Send + Sync + 'static
@@ -196,7 +196,7 @@ pub struct AggregateJsonObjectAggFunction<V, State> {
     _state: PhantomData<State>,
 }
 
-impl<V, State> AggregateFunction for AggregateJsonObjectAggFunction<V, State>
+impl<V, State> SyncAggregateFunction for AggregateJsonObjectAggFunction<V, State>
 where
     V: ValueType + Send + Sync,
     State: BinaryScalarStateFunc<V>,
@@ -329,7 +329,10 @@ where
     V: ValueType + Send + Sync,
     State: BinaryScalarStateFunc<V>,
 {
-    fn try_create(display_name: &str, return_type: DataType) -> Result<Arc<dyn AggregateFunction>> {
+    fn try_create(
+        display_name: &str,
+        return_type: DataType,
+    ) -> Result<Arc<dyn SyncAggregateFunction>> {
         let func = AggregateJsonObjectAggFunction::<V, State> {
             display_name: display_name.to_string(),
             return_type,
@@ -381,7 +384,7 @@ pub fn try_create_aggregate_json_object_agg_function(
     display_name: &str,
     _params: Vec<Scalar>,
     argument_types: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_binary_arguments(display_name, argument_types.len())?;
 
     let key_type = argument_types[0].remove_nullable();

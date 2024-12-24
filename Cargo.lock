@@ -3276,6 +3276,7 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "async-backtrace",
+ "async-trait",
  "base64 0.22.1",
  "borsh",
  "bumpalo",

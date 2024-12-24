@@ -33,7 +33,7 @@ use super::QuantileData;
 use super::UnaryState;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionDescription;
 use crate::aggregates::assert_unary_arguments;
-use crate::aggregates::AggregateFunctionRef;
+use crate::aggregates::SyncAggregateFunctionRef;
 use crate::with_simple_no_number_mapped_type;
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -164,7 +164,7 @@ pub fn try_create_aggregate_quantile_disc_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_unary_arguments(display_name, arguments.len())?;
     let data_type = arguments[0].clone();
     let levels = get_levels(&params)?;

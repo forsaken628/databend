@@ -45,13 +45,13 @@ use num_traits::AsPrimitive;
 
 use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
-use super::AggregateFunctionRef;
 use super::AggregateNullVariadicAdaptor;
 use super::StateAddr;
+use super::SyncAggregateFunctionRef;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionDescription;
 use crate::aggregates::assert_unary_params;
 use crate::aggregates::assert_variadic_arguments;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 use crate::BUILTIN_FUNCTIONS;
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -157,7 +157,7 @@ pub struct AggregateWindowFunnelFunction<T> {
     t: PhantomData<T>,
 }
 
-impl<T> AggregateFunction for AggregateWindowFunnelFunction<T>
+impl<T> SyncAggregateFunction for AggregateWindowFunnelFunction<T>
 where
     T: ArgType + Send + Sync,
     T::Scalar: Number
@@ -312,10 +312,10 @@ where
 
     fn get_own_null_adaptor(
         &self,
-        _nested_function: AggregateFunctionRef,
+        _nested_function: SyncAggregateFunctionRef,
         _params: Vec<Scalar>,
         _arguments: Vec<DataType>,
-    ) -> Result<Option<AggregateFunctionRef>> {
+    ) -> Result<Option<SyncAggregateFunctionRef>> {
         Ok(Some(AggregateNullVariadicAdaptor::<false>::create(
             Arc::new(self.clone()),
         )))
@@ -344,7 +344,7 @@ where
         display_name: &str,
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         let event_size = arguments.len() - 1;
         let window = check_number::<_, u64>(
             None,
@@ -413,7 +413,7 @@ pub fn try_create_aggregate_window_funnel_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_unary_params(display_name, params.len())?;
     assert_variadic_arguments(display_name, arguments.len(), (1, 32))?;
 

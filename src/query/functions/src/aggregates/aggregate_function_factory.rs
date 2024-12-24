@@ -23,8 +23,8 @@ use databend_common_expression::Scalar;
 
 use super::AggregateFunctionCombinatorNull;
 use super::AggregateFunctionOrNullAdaptor;
-use crate::aggregates::AggregateFunctionRef;
 use crate::aggregates::Aggregators;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 // The NULL value in the those function needs to be handled separately.
 const NEED_NULL_AGGREGATE_FUNCTIONS: [&str; 7] = [
@@ -40,7 +40,7 @@ const NEED_NULL_AGGREGATE_FUNCTIONS: [&str; 7] = [
 const STATE_SUFFIX: &str = "_state";
 
 pub type AggregateFunctionCreator =
-    Box<dyn Fn(&str, Vec<Scalar>, Vec<DataType>) -> Result<AggregateFunctionRef> + Sync + Send>;
+    Box<dyn Fn(&str, Vec<Scalar>, Vec<DataType>) -> Result<SyncAggregateFunctionRef> + Sync + Send>;
 
 pub type AggregateFunctionCombinatorCreator = Box<
     dyn Fn(
@@ -48,7 +48,7 @@ pub type AggregateFunctionCombinatorCreator = Box<
             Vec<Scalar>,
             Vec<DataType>,
             &AggregateFunctionCreator,
-        ) -> Result<AggregateFunctionRef>
+        ) -> Result<SyncAggregateFunctionRef>
         + Sync
         + Send,
 >;
@@ -170,7 +170,7 @@ impl AggregateFunctionFactory {
         name: impl AsRef<str>,
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         self.get_or_null(name, params, arguments, true)
     }
 
@@ -180,7 +180,7 @@ impl AggregateFunctionFactory {
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
         or_null: bool,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         let name = name.as_ref();
         let mut features = AggregateFunctionFeatures::default();
 
@@ -229,7 +229,7 @@ impl AggregateFunctionFactory {
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
         features: &mut AggregateFunctionFeatures,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         let lowercase_name = name.to_lowercase();
         let aggregate_functions_map = &self.case_insensitive_desc;
         if let Some(desc) = aggregate_functions_map.get(&lowercase_name) {

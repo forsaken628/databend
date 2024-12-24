@@ -18,21 +18,22 @@ use databend_common_base::runtime::drop_guard;
 use databend_common_exception::Result;
 use databend_common_expression::types::DataType;
 use databend_common_expression::types::NumberDataType;
+use databend_common_expression::AggregateFunctionRef;
 use databend_common_expression::ColumnBuilder;
 use databend_common_expression::DataBlock;
 use databend_common_expression::DataSchema;
 use databend_common_expression::InputColumns;
 use databend_common_functions::aggregates::get_layout_offsets;
-use databend_common_functions::aggregates::AggregateFunction;
 use databend_common_functions::aggregates::AggregateFunctionFactory;
 use databend_common_functions::aggregates::StateAddr;
+use databend_common_functions::aggregates::SyncAggregateFunctionRef;
 use databend_common_sql::executor::physical_plans::LagLeadDefault;
 use databend_common_sql::executor::physical_plans::WindowFunction;
 
 #[derive(Clone)]
 pub enum WindowFunctionInfo {
     // (func instance, argument offsets)
-    Aggregate(Arc<dyn AggregateFunction>, Vec<usize>),
+    Aggregate(SyncAggregateFunctionRef, Vec<usize>),
     RowNumber,
     Rank,
     DenseRank,
@@ -47,7 +48,7 @@ type Arena = bumpalo::Bump;
 pub struct WindowFuncAggImpl {
     // Need to hold arena until `drop`.
     _arena: Arena,
-    agg: Arc<dyn AggregateFunction>,
+    agg: SyncAggregateFunctionRef,
     place: StateAddr,
     args: Vec<usize>,
 }
@@ -234,7 +235,10 @@ impl WindowFunctionImpl {
             WindowFunctionInfo::Aggregate(agg, args) => {
                 let arena = Arena::new();
                 let mut state_offset = Vec::with_capacity(1);
-                let layout = get_layout_offsets(&[agg.clone()], &mut state_offset)?;
+                let layout = get_layout_offsets(
+                    &[AggregateFunctionRef::Sync(agg.clone())],
+                    &mut state_offset,
+                )?;
                 let place: StateAddr = arena.alloc_layout(layout).into();
                 let place = place.next(state_offset[0]);
                 let agg = WindowFuncAggImpl {

@@ -33,7 +33,7 @@ use super::FunctionData;
 use super::UnaryState;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionDescription;
 use crate::aggregates::aggregator_common::assert_unary_arguments;
-use crate::aggregates::AggregateFunctionRef;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 #[derive(BorshSerialize, BorshDeserialize)]
 struct NumberAvgState<T, TSum>
@@ -205,7 +205,7 @@ pub fn try_create_aggregate_avg_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_unary_arguments(display_name, arguments.len())?;
 
     let data_type = if arguments[0].is_null() {

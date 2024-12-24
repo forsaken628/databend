@@ -33,7 +33,7 @@ use databend_common_expression::FunctionContext;
 use databend_common_expression::Scalar;
 use simple_hll::HyperLogLog;
 
-use super::aggregate_function::AggregateFunction;
+use super::aggregate_function::SyncAggregateFunction;
 use super::aggregate_function_factory::AggregateFunctionDescription;
 use super::AggregateUnaryFunction;
 use super::FunctionData;
@@ -77,7 +77,7 @@ pub fn try_create_aggregate_approx_count_distinct_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_unary_arguments(display_name, arguments.len())?;
 
     let mut p = 14;
@@ -117,7 +117,7 @@ fn create_templated<const P: usize>(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     let return_type = DataType::Number(NumberDataType::UInt64);
     with_number_mapped_type!(|NUM_TYPE| match &arguments[0] {
         DataType::Number(NumberDataType::NUM_TYPE) => {

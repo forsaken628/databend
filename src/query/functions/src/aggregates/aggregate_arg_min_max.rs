@@ -39,10 +39,10 @@ use super::aggregate_scalar_state::TYPE_MAX;
 use super::aggregate_scalar_state::TYPE_MIN;
 use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
-use super::AggregateFunctionRef;
 use super::StateAddr;
+use super::SyncAggregateFunctionRef;
 use crate::aggregates::assert_binary_arguments;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 use crate::with_compare_mapped_type;
 use crate::with_simple_no_number_mapped_type;
 
@@ -201,7 +201,7 @@ pub struct AggregateArgMinMaxFunction<A, V, C, State> {
     _state: PhantomData<State>,
 }
 
-impl<A, V, C, State> AggregateFunction for AggregateArgMinMaxFunction<A, V, C, State>
+impl<A, V, C, State> SyncAggregateFunction for AggregateArgMinMaxFunction<A, V, C, State>
 where
     A: ValueType + Send + Sync,
     V: ValueType + Send + Sync,
@@ -321,7 +321,7 @@ where
     pub fn try_create(
         display_name: &str,
         return_data_type: DataType,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         Ok(Arc::new(AggregateArgMinMaxFunction::<A, V, C, State> {
             display_name: display_name.to_owned(),
             return_data_type,
@@ -337,7 +337,7 @@ pub fn try_create_aggregate_arg_minmax_function<const CMP_TYPE: u8>(
     display_name: &str,
     _params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_binary_arguments(display_name, arguments.len())?;
     let arg_type = arguments[0].clone();
     let val_type = arguments[1].clone();

@@ -39,7 +39,7 @@ use super::FunctionData;
 use super::UnaryState;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionDescription;
 use crate::aggregates::aggregator_common::assert_unary_arguments;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 
 const STD_POP: u8 = 0;
 const STD_SAMP: u8 = 1;
@@ -195,7 +195,7 @@ pub fn try_create_aggregate_stddev_pop_function<const TYPE: u8>(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_unary_arguments(display_name, arguments.len())?;
     with_number_mapped_type!(|NUM_TYPE| match &arguments[0] {
         DataType::Number(NumberDataType::NUM_TYPE) => {

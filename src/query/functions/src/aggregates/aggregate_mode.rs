@@ -23,8 +23,8 @@ use borsh::BorshSerialize;
 use databend_common_exception::Result;
 use databend_common_expression::types::*;
 use databend_common_expression::with_number_mapped_type;
-use databend_common_expression::AggregateFunctionRef;
 use databend_common_expression::Scalar;
+use databend_common_expression::SyncAggregateFunctionRef;
 
 use super::FunctionData;
 use super::UnaryState;
@@ -111,7 +111,7 @@ pub fn try_create_aggregate_mode_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_unary_arguments(display_name, arguments.len())?;
 
     let data_type = arguments[0].clone();

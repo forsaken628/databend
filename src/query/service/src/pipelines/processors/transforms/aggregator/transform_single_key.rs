@@ -115,11 +115,15 @@ impl AccumulatingTransform for PartialSingleStateAggregator {
                 let agg_index = block.num_columns() - self.funcs.len() + idx;
                 let agg_state = block.get_by_offset(agg_index).value.as_column().unwrap();
 
-                func.batch_merge_single(place, agg_state)?;
+                func.as_sync()
+                    .unwrap()
+                    .batch_merge_single(place, agg_state)?;
             } else {
                 let columns =
                     InputColumns::new_block_proxy(self.arg_indices[idx].as_slice(), &block);
-                func.accumulate(place, columns, None, block.num_rows())?;
+                func.as_sync()
+                    .unwrap()
+                    .accumulate(place, columns, None, block.num_rows())?;
             }
         }
 
@@ -256,10 +260,12 @@ impl AccumulatingTransform for FinalSingleStateAggregator {
             for (index, func) in self.funcs.iter().enumerate() {
                 let main_place = main_places[index];
                 for col in self.to_merge_data[index].iter() {
-                    func.batch_merge_single(main_place, col)?;
+                    func.as_sync()
+                        .unwrap()
+                        .batch_merge_single(main_place, col)?;
                 }
                 let array = aggr_values[index].borrow_mut();
-                func.merge_result(main_place, array)?;
+                func.as_sync().unwrap().merge_result(main_place, array)?;
             }
 
             let mut columns = Vec::with_capacity(self.funcs.len());

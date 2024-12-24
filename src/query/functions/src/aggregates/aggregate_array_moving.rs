@@ -47,8 +47,8 @@ use databend_common_expression::ScalarRef;
 use ethnum::i256;
 use num_traits::AsPrimitive;
 
-use super::aggregate_function::AggregateFunction;
-use super::aggregate_function::AggregateFunctionRef;
+use super::aggregate_function::SyncAggregateFunction;
+use super::aggregate_function::SyncAggregateFunctionRef;
 use super::aggregate_function_factory::AggregateFunctionDescription;
 use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
@@ -392,7 +392,7 @@ pub struct AggregateArrayMovingAvgFunction<State> {
     scale_add: u8,
 }
 
-impl<State> AggregateFunction for AggregateArrayMovingAvgFunction<State>
+impl<State> SyncAggregateFunction for AggregateArrayMovingAvgFunction<State>
 where State: SumState
 {
     fn name(&self) -> &str {
@@ -484,7 +484,7 @@ where State: SumState
         params: Vec<Scalar>,
         return_type: DataType,
         scale_add: u8,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         let window_size = if params.len() == 1 {
             let window_size = check_number::<_, u64>(
                 None,
@@ -515,7 +515,7 @@ pub fn try_create_aggregate_array_moving_avg_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_unary_arguments(display_name, arguments.len())?;
     assert_variadic_params(display_name, params.len(), (0, 1))?;
 
@@ -586,7 +586,7 @@ pub struct AggregateArrayMovingSumFunction<State> {
     return_type: DataType,
 }
 
-impl<State> AggregateFunction for AggregateArrayMovingSumFunction<State>
+impl<State> SyncAggregateFunction for AggregateArrayMovingSumFunction<State>
 where State: SumState
 {
     fn name(&self) -> &str {
@@ -677,7 +677,7 @@ where State: SumState
         display_name: &str,
         params: Vec<Scalar>,
         return_type: DataType,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         let window_size = if params.len() == 1 {
             let window_size = check_number::<_, u64>(
                 None,
@@ -707,7 +707,7 @@ pub fn try_create_aggregate_array_moving_sum_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_unary_arguments(display_name, arguments.len())?;
     assert_variadic_params(display_name, params.len(), (0, 1))?;
 

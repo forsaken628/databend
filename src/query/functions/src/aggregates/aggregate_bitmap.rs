@@ -45,7 +45,7 @@ use super::StateAddrs;
 use crate::aggregates::assert_arguments;
 use crate::aggregates::assert_unary_arguments;
 use crate::aggregates::assert_variadic_params;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 use crate::with_simple_no_number_mapped_type;
 use crate::BUILTIN_FUNCTIONS;
 
@@ -61,7 +61,7 @@ where
     OP: BitmapOperate,
     AGG: BitmapAggResult,
 {
-    fn try_create(display_name: &str) -> Result<Arc<dyn AggregateFunction>> {
+    fn try_create(display_name: &str) -> Result<Arc<dyn SyncAggregateFunction>> {
         let func = AggregateBitmapFunction::<OP, AGG> {
             display_name: display_name.to_string(),
             _op: PhantomData,
@@ -201,7 +201,7 @@ impl BitmapAggState {
     }
 }
 
-impl<OP, AGG> AggregateFunction for AggregateBitmapFunction<OP, AGG>
+impl<OP, AGG> SyncAggregateFunction for AggregateBitmapFunction<OP, AGG>
 where
     OP: BitmapOperate,
     AGG: BitmapAggResult,
@@ -358,7 +358,7 @@ where
     fn try_create(
         display_name: &str,
         filter_values: Vec<T::Scalar>,
-    ) -> Result<Arc<dyn AggregateFunction>> {
+    ) -> Result<Arc<dyn SyncAggregateFunction>> {
         let func = AggregateBitmapIntersectCountFunction::<T> {
             display_name: display_name.to_string(),
             inner: AggregateBitmapFunction {
@@ -419,7 +419,7 @@ where
     }
 }
 
-impl<T> AggregateFunction for AggregateBitmapIntersectCountFunction<T>
+impl<T> SyncAggregateFunction for AggregateBitmapIntersectCountFunction<T>
 where
     T: ValueType + Send + Sync,
     <T as ValueType>::Scalar: Send + Sync,
@@ -513,7 +513,7 @@ pub fn try_create_aggregate_bitmap_function<const OP_TYPE: u8, const AGG_TYPE: u
     display_name: &str,
     _params: Vec<Scalar>,
     argument_types: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_unary_arguments(display_name, argument_types.len())?;
     let data_type = argument_types[0].clone();
     with_bitmap_op_mapped_type!(|OP| match OP_TYPE {
@@ -549,7 +549,7 @@ pub fn try_create_aggregate_bitmap_intersect_count_function(
     display_name: &str,
     params: Vec<Scalar>,
     argument_types: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_arguments(display_name, argument_types.len(), 2)?;
     assert_variadic_params(display_name, params.len(), (1, 32))?;
 

@@ -26,8 +26,8 @@ use databend_common_expression::types::decimal::*;
 use databend_common_expression::types::number::*;
 use databend_common_expression::types::*;
 use databend_common_expression::with_number_mapped_type;
-use databend_common_expression::AggregateFunctionRef;
 use databend_common_expression::Scalar;
+use databend_common_expression::SyncAggregateFunctionRef;
 use ethnum::i256;
 use serde::Deserialize;
 use serde::Serialize;
@@ -167,7 +167,7 @@ pub fn try_create_aggregate_histogram_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_variadic_arguments(display_name, arguments.len(), (1, 2))?;
 
     let data_type = arguments[0].clone();

@@ -29,8 +29,8 @@ use databend_common_expression::ColumnBuilder;
 use databend_common_expression::InputColumns;
 use databend_common_expression::Scalar;
 
-use super::aggregate_function::AggregateFunction;
-use super::aggregate_function::AggregateFunctionRef;
+use super::aggregate_function::SyncAggregateFunction;
+use super::aggregate_function::SyncAggregateFunctionRef;
 use super::aggregate_function_factory::AggregateFunctionDescription;
 use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
@@ -59,7 +59,7 @@ pub struct AggregateRetentionFunction {
     events_size: u8,
 }
 
-impl AggregateFunction for AggregateRetentionFunction {
+impl SyncAggregateFunction for AggregateRetentionFunction {
     fn name(&self) -> &str {
         "AggregateRetentionFunction"
     }
@@ -197,7 +197,7 @@ impl AggregateRetentionFunction {
     pub fn try_create(
         display_name: &str,
         arguments: Vec<DataType>,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         Ok(Arc::new(Self {
             display_name: display_name.to_owned(),
             events_size: arguments.len() as u8,
@@ -209,7 +209,7 @@ pub fn try_create_aggregate_retention_function(
     display_name: &str,
     _params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_variadic_arguments(display_name, arguments.len(), (1, 32))?;
 
     for argument in arguments.iter() {

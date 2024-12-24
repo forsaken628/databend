@@ -27,7 +27,7 @@ use super::FunctionData;
 use super::UnaryState;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionDescription;
 use crate::aggregates::assert_unary_arguments;
-use crate::aggregates::AggregateFunctionRef;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 struct KurtosisState {
@@ -115,7 +115,7 @@ pub fn try_create_aggregate_kurtosis_function(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     assert_unary_arguments(display_name, arguments.len())?;
 
     with_number_mapped_type!(|NUM_TYPE| match &arguments[0] {

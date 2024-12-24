@@ -27,7 +27,7 @@ use databend_common_expression::ColumnBuilder;
 use databend_common_expression::InputColumns;
 use databend_common_expression::Scalar;
 
-use super::aggregate_function::AggregateFunction;
+use super::aggregate_function::SyncAggregateFunction;
 use super::aggregate_function_factory::AggregateFunctionDescription;
 use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
@@ -48,7 +48,7 @@ impl AggregateCountFunction {
         display_name: &str,
         _params: Vec<Scalar>,
         arguments: Vec<DataType>,
-    ) -> Result<Arc<dyn AggregateFunction>> {
+    ) -> Result<Arc<dyn SyncAggregateFunction>> {
         assert_variadic_arguments(display_name, arguments.len(), (0, 1))?;
         Ok(Arc::new(AggregateCountFunction {
             display_name: display_name.to_string(),
@@ -65,7 +65,7 @@ impl AggregateCountFunction {
     }
 }
 
-impl AggregateFunction for AggregateCountFunction {
+impl SyncAggregateFunction for AggregateCountFunction {
     fn name(&self) -> &str {
         "AggregateCountFunction"
     }
@@ -199,10 +199,10 @@ impl AggregateFunction for AggregateCountFunction {
 
     fn get_own_null_adaptor(
         &self,
-        _nested_function: super::AggregateFunctionRef,
+        _nested_function: super::SyncAggregateFunctionRef,
         _params: Vec<Scalar>,
         _arguments: Vec<DataType>,
-    ) -> Result<Option<super::AggregateFunctionRef>> {
+    ) -> Result<Option<super::SyncAggregateFunctionRef>> {
         Ok(Some(Arc::new(self.clone())))
     }
 }

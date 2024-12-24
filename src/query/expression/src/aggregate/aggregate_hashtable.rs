@@ -208,7 +208,12 @@ impl AggregateHashTable {
                     .zip(params.iter())
                     .zip(self.payload.state_addr_offsets.iter())
                 {
-                    aggr.accumulate_keys(state_places, *addr_offset, *params, row_count)?;
+                    aggr.as_sync().unwrap().accumulate_keys(
+                        state_places,
+                        *addr_offset,
+                        *params,
+                        row_count,
+                    )?;
                 }
             } else {
                 for ((aggr, agg_state), addr_offset) in self
@@ -218,7 +223,9 @@ impl AggregateHashTable {
                     .zip(agg_states.iter())
                     .zip(self.payload.state_addr_offsets.iter())
                 {
-                    aggr.batch_merge(state_places, *addr_offset, agg_state)?;
+                    aggr.as_sync()
+                        .unwrap()
+                        .batch_merge(state_places, *addr_offset, agg_state)?;
                 }
             }
         }
@@ -418,7 +425,9 @@ impl AggregateHashTable {
                 .iter()
                 .zip(self.payload.state_addr_offsets.iter())
             {
-                aggr.batch_merge_states(places, rhses, *addr_offset)?;
+                aggr.as_sync()
+                    .unwrap()
+                    .batch_merge_states(places, rhses, *addr_offset)?;
             }
         }
 
@@ -439,7 +448,7 @@ impl AggregateHashTable {
                 let return_type = aggr.return_type()?;
                 let mut builder = ColumnBuilder::with_capacity(&return_type, row_count * 4);
 
-                aggr.batch_merge_result(
+                aggr.as_sync().unwrap().batch_merge_result(
                     &flush_state.state_places.as_slice()[0..row_count],
                     *addr_offset,
                     &mut builder,

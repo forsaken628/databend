@@ -41,9 +41,9 @@ use crate::aggregates::aggregate_quantile_tdigest::MEDIAN;
 use crate::aggregates::aggregate_quantile_tdigest::QUANTILE;
 use crate::aggregates::assert_binary_arguments;
 use crate::aggregates::assert_params;
-use crate::aggregates::AggregateFunction;
-use crate::aggregates::AggregateFunctionRef;
 use crate::aggregates::StateAddr;
+use crate::aggregates::SyncAggregateFunction;
+use crate::aggregates::SyncAggregateFunctionRef;
 use crate::BUILTIN_FUNCTIONS;
 
 #[derive(Clone)]
@@ -66,7 +66,7 @@ where
     }
 }
 
-impl<T0, T1> AggregateFunction for AggregateQuantileTDigestWeightedFunction<T0, T1>
+impl<T0, T1> SyncAggregateFunction for AggregateQuantileTDigestWeightedFunction<T0, T1>
 where
     T0: Number + AsPrimitive<f64>,
     T1: Number + AsPrimitive<u64>,
@@ -184,7 +184,7 @@ where
         return_type: DataType,
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
-    ) -> Result<Arc<dyn AggregateFunction>> {
+    ) -> Result<Arc<dyn SyncAggregateFunction>> {
         let levels = if params.len() == 1 {
             let level: F64 = check_number(
                 None,
@@ -256,7 +256,7 @@ pub fn try_create_aggregate_quantile_tdigest_weighted_function<const TYPE: u8>(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     if TYPE == MEDIAN {
         assert_params(display_name, params.len(), 0)?;
     }

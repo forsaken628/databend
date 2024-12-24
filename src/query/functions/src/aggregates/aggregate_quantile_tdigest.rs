@@ -42,9 +42,9 @@ use super::borsh_serialize_state;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionDescription;
 use crate::aggregates::assert_params;
 use crate::aggregates::assert_unary_arguments;
-use crate::aggregates::AggregateFunction;
-use crate::aggregates::AggregateFunctionRef;
 use crate::aggregates::StateAddr;
+use crate::aggregates::SyncAggregateFunction;
+use crate::aggregates::SyncAggregateFunctionRef;
 use crate::BUILTIN_FUNCTIONS;
 
 pub(crate) const MEDIAN: u8 = 0;
@@ -293,7 +293,7 @@ where T: Number + AsPrimitive<f64>
     }
 }
 
-impl<T> AggregateFunction for AggregateQuantileTDigestFunction<T>
+impl<T> SyncAggregateFunction for AggregateQuantileTDigestFunction<T>
 where T: Number + AsPrimitive<f64>
 {
     fn name(&self) -> &str {
@@ -398,7 +398,7 @@ where T: Number + AsPrimitive<f64>
         return_type: DataType,
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
-    ) -> Result<Arc<dyn AggregateFunction>> {
+    ) -> Result<Arc<dyn SyncAggregateFunction>> {
         let levels = if params.len() == 1 {
             let level: F64 = check_number(
                 None,
@@ -469,7 +469,7 @@ pub fn try_create_aggregate_quantile_tdigest_function<const TYPE: u8>(
     display_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<AggregateFunctionRef> {
+) -> Result<SyncAggregateFunctionRef> {
     if TYPE == MEDIAN {
         assert_params(display_name, params.len(), 0)?;
     }

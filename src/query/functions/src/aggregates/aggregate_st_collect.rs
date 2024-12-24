@@ -49,7 +49,7 @@ use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
 use super::StateAddr;
 use crate::aggregates::assert_unary_arguments;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct StCollectState<T>
@@ -195,7 +195,7 @@ pub struct AggregateStCollectFunction<T, State> {
     _state: PhantomData<State>,
 }
 
-impl<T, State> AggregateFunction for AggregateStCollectFunction<T, State>
+impl<T, State> SyncAggregateFunction for AggregateStCollectFunction<T, State>
 where
     T: ValueType + Send + Sync,
     State: ScalarStateFunc<T>,
@@ -345,7 +345,10 @@ where
     T: ValueType + Send + Sync,
     State: ScalarStateFunc<T>,
 {
-    fn try_create(display_name: &str, return_type: DataType) -> Result<Arc<dyn AggregateFunction>> {
+    fn try_create(
+        display_name: &str,
+        return_type: DataType,
+    ) -> Result<Arc<dyn SyncAggregateFunction>> {
         let func = AggregateStCollectFunction::<T, State> {
             display_name: display_name.to_string(),
             return_type,
@@ -360,7 +363,7 @@ pub fn try_create_aggregate_st_collect_function(
     display_name: &str,
     _params: Vec<Scalar>,
     argument_types: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_unary_arguments(display_name, argument_types.len())?;
     if argument_types[0].remove_nullable() != DataType::Geometry
         && argument_types[0] != DataType::Null

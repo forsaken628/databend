@@ -25,12 +25,12 @@ use databend_common_expression::types::Bitmap;
 use databend_common_expression::types::DataType;
 use databend_common_expression::types::DecimalSize;
 use databend_common_expression::types::ValueType;
-use databend_common_expression::AggregateFunction;
-use databend_common_expression::AggregateFunctionRef;
 use databend_common_expression::ColumnBuilder;
 use databend_common_expression::InputColumns;
 use databend_common_expression::Scalar;
 use databend_common_expression::StateAddr;
+use databend_common_expression::SyncAggregateFunction;
+use databend_common_expression::SyncAggregateFunctionRef;
 
 pub trait UnaryState<T, R>:
     Send + Sync + Default + borsh::BorshSerialize + borsh::BorshDeserialize
@@ -117,7 +117,7 @@ where
         return_type: DataType,
         _params: Vec<Scalar>,
         _argument: DataType,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         Ok(Arc::new(Self::try_create(
             display_name,
             return_type,
@@ -187,7 +187,7 @@ fn check_decimal(builder: &ColumnBuilder) -> Option<DecimalSize> {
     }
 }
 
-impl<S, T, R> AggregateFunction for AggregateUnaryFunction<S, T, R>
+impl<S, T, R> SyncAggregateFunction for AggregateUnaryFunction<S, T, R>
 where
     S: UnaryState<T, R> + 'static,
     T: Send + Sync + ValueType,

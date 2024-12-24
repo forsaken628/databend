@@ -24,18 +24,18 @@ use databend_common_expression::ColumnBuilder;
 use databend_common_expression::InputColumns;
 use databend_common_io::prelude::BinaryWrite;
 
-use crate::aggregates::AggregateFunction;
-use crate::aggregates::AggregateFunctionRef;
 use crate::aggregates::StateAddr;
+use crate::aggregates::SyncAggregateFunction;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 #[derive(Clone)]
 pub struct AggregateNullVariadicAdaptor<const NULLABLE_RESULT: bool> {
-    nested: AggregateFunctionRef,
+    nested: SyncAggregateFunctionRef,
     size_of_data: usize,
 }
 
 impl<const NULLABLE_RESULT: bool> AggregateNullVariadicAdaptor<NULLABLE_RESULT> {
-    pub fn create(nested: AggregateFunctionRef) -> AggregateFunctionRef {
+    pub fn create(nested: SyncAggregateFunctionRef) -> SyncAggregateFunctionRef {
         let size_of_data = if NULLABLE_RESULT {
             let layout = nested.state_layout();
             layout.size()
@@ -75,7 +75,7 @@ impl<const NULLABLE_RESULT: bool> AggregateNullVariadicAdaptor<NULLABLE_RESULT> 
     }
 }
 
-impl<const NULLABLE_RESULT: bool> AggregateFunction
+impl<const NULLABLE_RESULT: bool> SyncAggregateFunction
     for AggregateNullVariadicAdaptor<NULLABLE_RESULT>
 {
     fn name(&self) -> &str {

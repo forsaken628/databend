@@ -25,25 +25,25 @@ use databend_common_expression::Scalar;
 use databend_common_io::prelude::BinaryWrite;
 
 use crate::aggregates::aggregate_function_factory::AggregateFunctionFeatures;
-use crate::aggregates::AggregateFunction;
-use crate::aggregates::AggregateFunctionRef;
 use crate::aggregates::StateAddr;
+use crate::aggregates::SyncAggregateFunction;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 /// OrNullAdaptor will use OrNull for aggregate functions.
 /// If there are no input values, return NULL or a default value, accordingly.
 /// Use a single additional byte of data after the nested function data:
 /// 0 means there was no input, 1 means there was some.
 pub struct AggregateFunctionOrNullAdaptor {
-    inner: AggregateFunctionRef,
+    inner: SyncAggregateFunctionRef,
     size_of_data: usize,
     inner_nullable: bool,
 }
 
 impl AggregateFunctionOrNullAdaptor {
     pub fn create(
-        inner: AggregateFunctionRef,
+        inner: SyncAggregateFunctionRef,
         features: AggregateFunctionFeatures,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         // count/count distinct should not be nullable for empty set, just return zero
         let inner_return_type = inner.return_type()?;
         if features.returns_default_when_only_null || inner_return_type == DataType::Null {
@@ -71,7 +71,7 @@ impl AggregateFunctionOrNullAdaptor {
     }
 }
 
-impl AggregateFunction for AggregateFunctionOrNullAdaptor {
+impl SyncAggregateFunction for AggregateFunctionOrNullAdaptor {
     fn name(&self) -> &str {
         self.inner.name()
     }
@@ -212,10 +212,10 @@ impl AggregateFunction for AggregateFunctionOrNullAdaptor {
 
     fn get_own_null_adaptor(
         &self,
-        nested_function: AggregateFunctionRef,
+        nested_function: SyncAggregateFunctionRef,
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
-    ) -> Result<Option<AggregateFunctionRef>> {
+    ) -> Result<Option<SyncAggregateFunctionRef>> {
         self.inner
             .get_own_null_adaptor(nested_function, params, arguments)
     }

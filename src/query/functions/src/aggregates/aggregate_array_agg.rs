@@ -41,7 +41,7 @@ use super::borsh_deserialize_state;
 use super::borsh_serialize_state;
 use super::StateAddr;
 use crate::aggregates::assert_unary_arguments;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 use crate::with_simple_no_number_mapped_type;
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
@@ -255,7 +255,7 @@ pub struct AggregateArrayAggFunction<T, State> {
     _state: PhantomData<State>,
 }
 
-impl<T, State> AggregateFunction for AggregateArrayAggFunction<T, State>
+impl<T, State> SyncAggregateFunction for AggregateArrayAggFunction<T, State>
 where
     T: ValueType + Send + Sync,
     State: ScalarStateFunc<T>,
@@ -400,7 +400,10 @@ where
     T: ValueType + Send + Sync,
     State: ScalarStateFunc<T>,
 {
-    fn try_create(display_name: &str, return_type: DataType) -> Result<Arc<dyn AggregateFunction>> {
+    fn try_create(
+        display_name: &str,
+        return_type: DataType,
+    ) -> Result<Arc<dyn SyncAggregateFunction>> {
         let func = AggregateArrayAggFunction::<T, State> {
             display_name: display_name.to_string(),
             return_type,
@@ -415,7 +418,7 @@ pub fn try_create_aggregate_array_agg_function(
     display_name: &str,
     _params: Vec<Scalar>,
     argument_types: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_unary_arguments(display_name, argument_types.len())?;
     let data_type = argument_types[0].clone();
     let nullable = data_type.is_nullable();

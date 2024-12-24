@@ -47,6 +47,7 @@ use databend_common_expression::types::StringType;
 use databend_common_expression::types::UInt64Type;
 use databend_common_expression::types::F32;
 use databend_common_expression::types::F64;
+use databend_common_expression::AggregateFunctionRef;
 use databend_common_expression::AggregateHashTable;
 use databend_common_expression::Column;
 use databend_common_expression::DataBlock;
@@ -79,7 +80,7 @@ fn test_agg_hashtable() {
         let group_columns = columns.clone();
         let group_types: Vec<_> = group_columns.iter().map(|c| c.data_type()).collect();
 
-        let aggrs = vec![
+        let aggrs = [
             factory
                 .get("min", vec![], vec![Int64Type::data_type()])
                 .unwrap(),
@@ -92,9 +93,12 @@ fn test_agg_hashtable() {
             factory
                 .get("count", vec![], vec![Int64Type::data_type()])
                 .unwrap(),
-        ];
+        ]
+        .into_iter()
+        .map(AggregateFunctionRef::Sync)
+        .collect_vec();
 
-        let params: Vec<Vec<Column>> = aggrs.iter().map(|_| vec![columns[1].clone()]).collect();
+        let params: Vec<_> = aggrs.iter().map(|_| vec![columns[1].clone()]).collect();
         let params = params.iter().map(|v| v.into()).collect_vec();
 
         let config = HashTableConfig::default();

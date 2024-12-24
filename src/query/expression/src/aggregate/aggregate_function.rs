@@ -16,8 +16,10 @@ use std::alloc::Layout;
 use std::fmt;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use databend_common_column::bitmap::Bitmap;
 use databend_common_exception::Result;
+use enum_as_inner::EnumAsInner;
 
 use super::StateAddr;
 use crate::types::binary::BinaryColumnBuilder;
@@ -27,11 +29,75 @@ use crate::ColumnBuilder;
 use crate::InputColumns;
 use crate::Scalar;
 
-pub type AggregateFunctionRef = Arc<dyn AggregateFunction>;
+pub type SyncAggregateFunctionRef = Arc<dyn SyncAggregateFunction>;
+
+#[derive(Clone, EnumAsInner)]
+pub enum AggregateFunctionRef {
+    Sync(Arc<dyn SyncAggregateFunction>),
+    Async(Arc<dyn AsyncAggregateFunction>),
+}
+
+impl AggregateFunctionRef {
+    pub fn is_sync(&self) -> bool {
+        match self {
+            AggregateFunctionRef::Sync(_) => true,
+            AggregateFunctionRef::Async(_) => false,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            AggregateFunctionRef::Sync(f) => f.name(),
+            AggregateFunctionRef::Async(f) => f.name(),
+        }
+    }
+
+    pub fn return_type(&self) -> Result<DataType> {
+        match self {
+            AggregateFunctionRef::Sync(f) => f.return_type(),
+            AggregateFunctionRef::Async(f) => f.return_type(),
+        }
+    }
+
+    pub fn init_state(&self, place: StateAddr) {
+        match self {
+            AggregateFunctionRef::Sync(f) => f.init_state(place),
+            AggregateFunctionRef::Async(f) => f.init_state(place),
+        }
+    }
+
+    pub fn state_layout(&self) -> Layout {
+        match self {
+            AggregateFunctionRef::Sync(f) => f.state_layout(),
+            AggregateFunctionRef::Async(f) => f.state_layout(),
+        }
+    }
+
+    pub fn serialize(&self, place: StateAddr, writer: &mut Vec<u8>) -> Result<()> {
+        match self {
+            AggregateFunctionRef::Sync(f) => f.serialize(place, writer),
+            AggregateFunctionRef::Async(f) => f.serialize(place, writer),
+        }
+    }
+
+    pub fn need_manual_drop_state(&self) -> bool {
+        match self {
+            AggregateFunctionRef::Sync(f) => f.need_manual_drop_state(),
+            AggregateFunctionRef::Async(f) => f.need_manual_drop_state(),
+        }
+    }
+
+    pub unsafe fn drop_state(&self, place: StateAddr) {
+        match self {
+            AggregateFunctionRef::Sync(f) => f.drop_state(place),
+            AggregateFunctionRef::Async(f) => f.drop_state(place),
+        }
+    }
+}
 
 /// AggregateFunction
 /// In AggregateFunction, all datablock columns are not ConstantColumn, we take the column as Full columns
-pub trait AggregateFunction: fmt::Display + Sync + Send {
+pub trait SyncAggregateFunction: fmt::Display + Sync + Send {
     fn name(&self) -> &str;
     fn return_type(&self) -> Result<DataType>;
 
@@ -151,10 +217,10 @@ pub trait AggregateFunction: fmt::Display + Sync + Send {
 
     fn get_own_null_adaptor(
         &self,
-        _nested_function: AggregateFunctionRef,
+        _nested_function: SyncAggregateFunctionRef,
         _params: Vec<Scalar>,
         _arguments: Vec<DataType>,
-    ) -> Result<Option<AggregateFunctionRef>> {
+    ) -> Result<Option<SyncAggregateFunctionRef>> {
         Ok(None)
     }
 
@@ -166,4 +232,42 @@ pub trait AggregateFunction: fmt::Display + Sync + Send {
     fn convert_const_to_full(&self) -> bool {
         true
     }
+}
+
+#[async_trait]
+pub trait AsyncAggregateFunction: fmt::Display + Sync + Send {
+    fn name(&self) -> &str;
+    fn return_type(&self) -> Result<DataType>;
+
+    fn init_state(&self, place: StateAddr);
+
+    fn is_state(&self) -> bool {
+        false
+    }
+
+    fn state_layout(&self) -> Layout;
+
+    async fn init(&mut self) -> Result<()>;
+
+    async fn merge(&self, place: StateAddr, reader: &mut &[u8]) -> Result<()>;
+
+    fn serialize(&self, place: StateAddr, writer: &mut Vec<u8>) -> Result<()>;
+
+    // std::mem::needs_drop::<State>
+    // if true will call drop_state
+    fn need_manual_drop_state(&self) -> bool {
+        false
+    }
+
+    /// # Safety
+    /// The caller must ensure that the [`_place`] has defined memory.
+    unsafe fn drop_state(&self, _place: StateAddr) {}
+
+    async fn accumulate_keys(
+        &self,
+        places: &[StateAddr],
+        offset: usize,
+        columns: InputColumns,
+        input_rows: usize,
+    ) -> Result<()>;
 }

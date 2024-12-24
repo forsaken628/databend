@@ -27,13 +27,13 @@ use super::AggregateFunctionFactory;
 use super::StateAddr;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionCreator;
 use crate::aggregates::aggregate_function_factory::CombinatorDescription;
-use crate::aggregates::AggregateFunction;
-use crate::aggregates::AggregateFunctionRef;
+use crate::aggregates::SyncAggregateFunction;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 #[derive(Clone)]
 pub struct AggregateStateCombinator {
     name: String,
-    nested: AggregateFunctionRef,
+    nested: SyncAggregateFunctionRef,
 }
 
 impl AggregateStateCombinator {
@@ -42,7 +42,7 @@ impl AggregateStateCombinator {
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
         _nested_creator: &AggregateFunctionCreator,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         let arg_name = arguments
             .iter()
             .map(|x| x.to_string())
@@ -61,7 +61,7 @@ impl AggregateStateCombinator {
     }
 }
 
-impl AggregateFunction for AggregateStateCombinator {
+impl SyncAggregateFunction for AggregateStateCombinator {
     fn name(&self) -> &str {
         &self.name
     }
@@ -136,10 +136,10 @@ impl AggregateFunction for AggregateStateCombinator {
 
     fn get_own_null_adaptor(
         &self,
-        _nested_function: super::AggregateFunctionRef,
+        _nested_function: super::SyncAggregateFunctionRef,
         _params: Vec<Scalar>,
         _arguments: Vec<DataType>,
-    ) -> Result<Option<super::AggregateFunctionRef>> {
+    ) -> Result<Option<super::SyncAggregateFunctionRef>> {
         Ok(Some(Arc::new(self.clone())))
     }
 }

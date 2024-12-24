@@ -30,16 +30,16 @@ use databend_common_expression::Scalar;
 use super::StateAddr;
 use crate::aggregates::aggregate_function_factory::AggregateFunctionCreator;
 use crate::aggregates::aggregate_function_factory::CombinatorDescription;
-use crate::aggregates::AggregateFunction;
-use crate::aggregates::AggregateFunctionRef;
 use crate::aggregates::StateAddrs;
+use crate::aggregates::SyncAggregateFunction;
+use crate::aggregates::SyncAggregateFunctionRef;
 
 #[derive(Clone)]
 pub struct AggregateIfCombinator {
     name: String,
     argument_len: usize,
     nested_name: String,
-    nested: AggregateFunctionRef,
+    nested: SyncAggregateFunctionRef,
 }
 
 impl AggregateIfCombinator {
@@ -48,7 +48,7 @@ impl AggregateIfCombinator {
         params: Vec<Scalar>,
         arguments: Vec<DataType>,
         nested_creator: &AggregateFunctionCreator,
-    ) -> Result<AggregateFunctionRef> {
+    ) -> Result<SyncAggregateFunctionRef> {
         let name = format!("IfCombinator({})", nested_name);
         let argument_len = arguments.len();
 
@@ -83,7 +83,7 @@ impl AggregateIfCombinator {
     }
 }
 
-impl AggregateFunction for AggregateIfCombinator {
+impl SyncAggregateFunction for AggregateIfCombinator {
     fn name(&self) -> &str {
         &self.name
     }

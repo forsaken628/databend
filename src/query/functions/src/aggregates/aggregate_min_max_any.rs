@@ -43,7 +43,7 @@ use super::FunctionData;
 use super::UnaryState;
 use crate::aggregates::aggregate_min_max_any_decimal::MinMaxAnyDecimalState;
 use crate::aggregates::assert_unary_arguments;
-use crate::aggregates::AggregateFunction;
+use crate::aggregates::SyncAggregateFunction;
 use crate::with_compare_mapped_type;
 use crate::with_simple_no_number_no_string_mapped_type;
 
@@ -267,7 +267,7 @@ pub fn try_create_aggregate_min_max_any_function<const CMP_TYPE: u8>(
     display_name: &str,
     params: Vec<Scalar>,
     argument_types: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     assert_unary_arguments(display_name, argument_types.len())?;
     let mut data_type = argument_types[0].clone();
     let need_drop = need_manual_drop_state(&data_type);

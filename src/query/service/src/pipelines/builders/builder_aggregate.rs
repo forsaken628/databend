@@ -244,7 +244,7 @@ impl PipelineBuilder {
             .into_iter()
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
-        let aggs: Vec<AggregateFunctionRef> = agg_funcs
+        let aggs = agg_funcs
             .iter()
             .map(|agg_func| {
                 let args = agg_func
@@ -254,7 +254,7 @@ impl PipelineBuilder {
                     .collect::<Result<Vec<_>>>()?;
                 agg_args.push(args);
 
-                match &agg_func.sig.udaf {
+                let func = match &agg_func.sig.udaf {
                     None => AggregateFunctionFactory::instance().get(
                         agg_func.sig.name.as_str(),
                         agg_func.sig.params.clone(),
@@ -280,16 +280,17 @@ impl PipelineBuilder {
                         agg_func.sig.return_type.clone(),
                     ),
                     Some((UDFType::Server(_), _state_fields)) => unimplemented!(),
-                }
+                }?;
+                Ok(AggregateFunctionRef::Sync(func))
             })
-            .collect::<Result<_>>()?;
+            .collect::<Result<Vec<_>>>()?;
 
         let params = AggregatorParams::try_create(
             input_schema,
             group_data_types,
-            &group_by,
-            &aggs,
-            &agg_args,
+            group_by,
+            aggs,
+            agg_args,
             enable_experimental_aggregate_hashtable,
             cluster_aggregator,
             max_block_size,

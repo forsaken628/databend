@@ -32,7 +32,7 @@ use super::aggregate_distinct_state::AggregateDistinctState;
 use super::aggregate_distinct_state::AggregateDistinctStringState;
 use super::aggregate_distinct_state::AggregateUniqStringState;
 use super::aggregate_distinct_state::DistinctStateFunc;
-use super::aggregate_function::AggregateFunction;
+use super::aggregate_function::SyncAggregateFunction;
 use super::aggregate_function_factory::AggregateFunctionCreator;
 use super::aggregate_function_factory::AggregateFunctionDescription;
 use super::aggregate_function_factory::CombinatorDescription;
@@ -46,11 +46,11 @@ pub struct AggregateDistinctCombinator<State> {
 
     nested_name: String,
     arguments: Vec<DataType>,
-    nested: Arc<dyn AggregateFunction>,
+    nested: Arc<dyn SyncAggregateFunction>,
     _state: PhantomData<State>,
 }
 
-impl<State> AggregateFunction for AggregateDistinctCombinator<State>
+impl<State> SyncAggregateFunction for AggregateDistinctCombinator<State>
 where State: DistinctStateFunc
 {
     fn name(&self) -> &str {
@@ -182,7 +182,7 @@ pub fn try_create_uniq(
     nested_name: &str,
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     let creator: AggregateFunctionCreator = Box::new(AggregateCountFunction::try_create);
     try_create(nested_name, params, arguments, &creator)
 }
@@ -192,7 +192,7 @@ pub fn try_create(
     params: Vec<Scalar>,
     arguments: Vec<DataType>,
     nested_creator: &AggregateFunctionCreator,
-) -> Result<Arc<dyn AggregateFunction>> {
+) -> Result<Arc<dyn SyncAggregateFunction>> {
     let name = format!("DistinctCombinator({})", nested_name);
     assert_variadic_arguments(&name, arguments.len(), (1, 32))?;
 
