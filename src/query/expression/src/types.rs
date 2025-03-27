@@ -21,6 +21,7 @@ pub mod date;
 pub mod decimal;
 pub mod empty_array;
 pub mod empty_map;
+pub mod fixed_size;
 pub mod generic;
 pub mod geography;
 pub mod geometry;

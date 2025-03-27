@@ -24,6 +24,7 @@ mod take_chunks;
 mod take_compact;
 mod take_ranges;
 mod topk;
+mod topk2;
 mod utils;
 
 pub use filter::FilterVisitor;
