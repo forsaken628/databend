@@ -209,7 +209,7 @@ impl From<std::io::Error> for ErrorCode {
             ErrorKind::NotFound => ErrorCode::StorageNotFound(msg),
             ErrorKind::PermissionDenied => ErrorCode::StoragePermissionDenied(msg),
             ErrorKind::InvalidData
-                if msg == "(invalid type: unit value, expected a tuple of size 2)" =>
+                if msg == "invalid data (invalid type: unit value, expected a tuple of size 2)" =>
             {
                 panic!("{msg}");
             }
