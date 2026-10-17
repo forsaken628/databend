@@ -280,6 +280,8 @@ impl VisitorMut<'_> for ReplaceColumnForGroupingSetsVisitor {
         function.refresh_return_type()
     }
 
+    // TODO: casts are not refreshed, so a cast target keeps its nullability when
+    // a rewrite makes the argument nullable. No query is known to reach this.
     fn visit_lambda_function(&mut self, lambda: &mut LambdaFunc) -> Result<()> {
         for argument in &mut lambda.args {
             self.visit(argument)?;

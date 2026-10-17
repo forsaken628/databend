@@ -14,6 +14,10 @@
 
 use databend_common_catalog::table_context::TableContextSettings;
 use databend_common_exception::Result;
+use databend_common_sql::optimizer::ir::QueryPlan;
+use databend_common_sql::plans::Plan;
+use databend_common_sql::plans::RelOperator;
+use databend_common_sql::plans::ScalarExpr;
 
 use crate::framework::golden::SqlTestCase;
 use crate::framework::golden::setup_context;
@@ -108,6 +112,25 @@ async fn test_optimizer_rewrites_keep_function_return_types_consistent() -> Resu
             sql: "SELECT * FROM equivalent_reduce_t \
                   WHERE a = [] AND is_null(array_reduce(a, (x, y) -> x + y))",
         },
+        SqlTestCase {
+            name: "decorrelated_reused_key_refreshes_function_return_types",
+            description: "The nullable outer key is replaced by the non-nullable inner key it equals.",
+            setup_sqls: &[
+                "CREATE TABLE reuse_a(k BIGINT NOT NULL, v BIGINT NOT NULL)",
+                "CREATE TABLE reuse_b(k BIGINT NOT NULL, v BIGINT NOT NULL)",
+                "CREATE TABLE reuse_c(k BIGINT NOT NULL, v BIGINT NOT NULL)",
+            ],
+            sql: "SELECT reuse_a.k FROM reuse_a LEFT JOIN reuse_b ON reuse_a.k = reuse_b.k \
+                  JOIN LATERAL (SELECT reuse_c.k FROM reuse_c WHERE reuse_c.v = reuse_b.v \
+                  GROUP BY reuse_c.k) t ON reuse_a.k = t.k",
+        },
+        SqlTestCase {
+            name: "binder_folded_argument_refreshes_function_return_types",
+            description: "Folding `CAST(1 AS INT NULL)` to `1_u8` drops the argument's nullability.",
+            setup_sqls: &["CREATE TABLE folded_arg_t(a INT NOT NULL)"],
+            sql: "SELECT a + CAST(1 AS INT NULL) FROM folded_arg_t \
+                  WHERE a = CAST(1 AS INT NULL) AND a + 1 > 0",
+        },
     ];
     for case in &cases {
         optimize(case, &[]).await?;
@@ -124,4 +147,112 @@ async fn test_optimizer_rewrites_keep_function_return_types_consistent() -> Resu
         ("max_inlist_to_or", "2"),
     ])
     .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_inferred_filters_keep_cast_targets_nullable() -> Result<()> {
+    // Filter inference moves `CAST(cast_outer.a AS STRING)` through the join key
+    // onto the nullable `cast_inner.n`. The type validator does not check casts,
+    // so inspect the plan: a non-nullable target would fail on NULL keys.
+    let setup_sqls: &[&str] = &[
+        "CREATE TABLE cast_outer(a INT NOT NULL)",
+        "CREATE TABLE cast_inner(n INT NULL)",
+    ];
+    let cases = [
+        SqlTestCase {
+            name: "join_key_filter",
+            description: "",
+            setup_sqls,
+            sql: "SELECT cast_outer.a FROM cast_outer \
+                  JOIN (SELECT n FROM cast_inner) q ON q.n = cast_outer.a \
+                  WHERE CAST(cast_outer.a AS STRING) <> ''",
+        },
+        SqlTestCase {
+            name: "decorrelated_key_filter",
+            description: "",
+            setup_sqls,
+            sql: "SELECT cast_outer.a FROM cast_outer WHERE EXISTS (SELECT 1 FROM \
+                  (SELECT CAST(cast_outer.a AS STRING) AS d, cast_inner.n AS n FROM cast_inner) q \
+                  WHERE q.n = cast_outer.a AND q.d <> '')",
+        },
+    ];
+    for case in &cases {
+        let ctx = setup_context(case).await?;
+        let plan = ctx.bind_sql(case.sql).await?;
+        let plan = ctx
+            .optimize_plan(plan)
+            .await?
+            .format_indent(Default::default(), &ctx.stat_context()?)?;
+        let inner_casts = plan
+            .match_indices("CAST(cast_inner.n (#")
+            .map(|(start, _)| &plan[start..])
+            .collect::<Vec<_>>();
+        assert!(
+            !inner_casts.is_empty(),
+            "{}: no inferred cast\n{plan}",
+            case.name
+        );
+        for cast in inner_casts {
+            let target = &cast[cast.find(" AS ").unwrap() + 4..];
+            assert!(
+                target.starts_with("String NULL)"),
+                "{}: inferred cast must be nullable\n{plan}",
+                case.name
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_type_validator_rejects_non_nullable_try_cast_target() -> Result<()> {
+    let case = SqlTestCase {
+        name: "try_cast_target",
+        description: "",
+        setup_sqls: &["CREATE TABLE try_cast_t(s STRING NOT NULL)"],
+        sql: "SELECT TRY_CAST(s AS INT) FROM try_cast_t",
+    };
+    let ctx = setup_context(&case).await?;
+    let Plan::Query {
+        s_expr, metadata, ..
+    } = ctx.bind_sql(case.sql).await?
+    else {
+        unreachable!()
+    };
+    let QueryPlan::Logical(expr) = *s_expr else {
+        unreachable!()
+    };
+    expr.validate_types(&metadata)?;
+
+    let mut node = &expr;
+    let mut eval = loop {
+        if let RelOperator::EvalScalar(eval) = node.plan()
+            && eval
+                .items
+                .iter()
+                .any(|item| matches!(item.scalar, ScalarExpr::CastExpr(_)))
+        {
+            break eval.clone();
+        }
+        node = node.child(0)?;
+    };
+    let item = eval
+        .items
+        .iter_mut()
+        .find(|item| matches!(item.scalar, ScalarExpr::CastExpr(_)))
+        .unwrap();
+    let ScalarExpr::CastExpr(cast) = &mut item.scalar else {
+        unreachable!()
+    };
+    assert!(cast.is_try && cast.target_type.is_nullable());
+    // Lowering always produces the nullable form, so a non-nullable declared
+    // target misstates the type that execution produces.
+    *cast.target_type = cast.target_type.remove_nullable();
+
+    let error = node
+        .replace_plan(eval)
+        .validate_types(&metadata)
+        .unwrap_err();
+    assert!(error.message().contains("try_cast target type mismatch"));
+    Ok(())
 }

@@ -544,11 +544,17 @@ impl SubqueryDecorrelatorOptimizer {
             srfs.push(new_item);
         }
         let metadata = self.ctx.metadata_read();
-        let scalar_items = derived_columns
-            .visible_symbols()
-            .into_iter()
-            .map(|index| Self::scalar_item_from_index(index, "outer.", &metadata))
-            .collect();
+        // Project the derived columns of this subquery's correlations only. The
+        // scope can also hold columns inherited from enclosing scopes, which the
+        // flattened input does not produce.
+        let mut projected = ColumnSet::new();
+        let mut scalar_items = Vec::with_capacity(correlated_columns.len());
+        for old in correlated_columns {
+            let index = derived_columns.must_resolve(*old)?;
+            if projected.insert(index) {
+                scalar_items.push(Self::scalar_item_from_index(index, "outer.", &metadata));
+            }
+        }
         Ok((
             flatten_plan
                 .build_unary(EvalScalar {

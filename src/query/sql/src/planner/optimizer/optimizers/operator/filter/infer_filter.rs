@@ -34,6 +34,7 @@ use crate::optimizer::optimizers::operator::filter::check_float_range;
 use crate::optimizer::optimizers::operator::filter::check_int_range;
 use crate::optimizer::optimizers::operator::filter::check_uint_range;
 use crate::optimizer::optimizers::operator::filter::remove_trivial_type_cast;
+use crate::plans::CastExpr;
 use crate::plans::ComparisonOp;
 use crate::plans::ConstantExpr;
 use crate::plans::FunctionCall;
@@ -507,6 +508,27 @@ impl<'a> InferFilterOptimizer<'a> {
                     self.visit(argument)?;
                 }
                 function.refresh_return_type()
+            }
+
+            fn visit_cast_expr(&mut self, cast: &mut CastExpr) -> Result<()> {
+                let previous_argument_type = cast.argument.data_type().into_owned();
+                self.visit(&mut cast.argument)?;
+                cast.refresh_target_type(&previous_argument_type);
+                // Derived predicates map columns back and forth within an
+                // equivalence class. Dropping the nullability that only followed
+                // a now non-nullable argument keeps that round trip exact, so the
+                // original predicate deduplicates the derived one. Outside
+                // VARIANT, a cast of a non-nullable value never yields NULL.
+                let argument_type = cast.argument.data_type();
+                if !cast.is_try
+                    && previous_argument_type.is_nullable_or_null()
+                    && !argument_type.is_nullable_or_null()
+                    && argument_type.as_ref() != &DataType::Variant
+                    && cast.target_type.is_nullable()
+                {
+                    cast.target_type = Box::new(cast.target_type.remove_nullable());
+                }
+                Ok(())
             }
         }
 

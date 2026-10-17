@@ -219,6 +219,41 @@ async fn test_final_aggregate_scope_checks_raw_arguments() -> Result<()> {
     Ok(())
 }
 
+/// Flattening a `ProjectSet` projects only the derived columns of its own
+/// correlations, not ones inherited from enclosing scopes that its input lacks.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_unnest_of_outer_column_keeps_column_scope() -> Result<()> {
+    let setup_sqls: &[&str] = &[
+        "CREATE TABLE srf_t1(a INT NOT NULL, arr ARRAY(INT) NOT NULL)",
+        "CREATE TABLE srf_t2(a INT NOT NULL, b INT NOT NULL, arr ARRAY(INT) NOT NULL)",
+        "CREATE TABLE srf_t3(a INT NOT NULL, b INT NOT NULL, arr ARRAY(INT) NOT NULL)",
+    ];
+    let cases = [
+        SqlTestCase {
+            name: "scalar_subquery_over_left_join",
+            description: "",
+            setup_sqls,
+            sql: "SELECT (SELECT max(u) FROM (SELECT unnest(srf_t2.arr) AS u FROM srf_t3 \
+                  WHERE srf_t3.b > srf_t2.b) q) \
+                  FROM srf_t1 LEFT JOIN srf_t2 ON srf_t1.a = srf_t2.a",
+        },
+        SqlTestCase {
+            name: "exists_with_reused_inner_key",
+            description: "",
+            setup_sqls,
+            sql: "SELECT srf_t1.a FROM srf_t1 WHERE EXISTS (SELECT 1 FROM \
+                  (SELECT unnest(srf_t1.arr) AS d, srf_t3.arr AS arr FROM srf_t3) q \
+                  WHERE q.arr = srf_t1.arr AND q.d > 0)",
+        },
+    ];
+    for case in cases {
+        let ctx = setup_context(&case).await?;
+        let plan = ctx.bind_sql(case.sql).await?;
+        ctx.optimize_plan(plan).await?;
+    }
+    Ok(())
+}
+
 /// Collects `EvalScalar` items that project a column their own child does not produce,
 /// and counts the expression scans so a test can prove it exercised the lateral `VALUES`
 /// path rather than passing vacuously.

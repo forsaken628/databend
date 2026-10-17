@@ -92,13 +92,18 @@ impl SubqueryDecorrelatorOptimizer {
                     .iter()
                     .map(|arg| self.flatten_scalar(arg, correlated_columns, derived_columns))
                     .collect::<Result<Vec<_>>>()?;
-                Ok(ScalarExpr::FunctionCall(FunctionCall {
+                let mut function = FunctionCall {
                     span: func.span,
                     func_name: func.func_name.clone(),
                     params: func.params.clone(),
                     arguments,
                     return_type: func.return_type.clone(),
-                }))
+                };
+                // A derived column can have different nullability than the
+                // outer column it replaces, e.g. a non-nullable inner key reused
+                // for a nullable outer key.
+                function.refresh_return_type()?;
+                Ok(ScalarExpr::FunctionCall(function))
             }
             ScalarExpr::LambdaFunction(lambda) => {
                 let args = lambda
@@ -108,6 +113,9 @@ impl SubqueryDecorrelatorOptimizer {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(ScalarExpr::LambdaFunction(lambda.with_args(args)?))
             }
+            // TODO: cast, aggregate, UDF, and UDAF types are kept as declared
+            // when a derived column of different nullability replaces an input.
+            // No query is known to reach this with a changed type.
             ScalarExpr::CastExpr(cast_expr) => {
                 let scalar =
                     self.flatten_scalar(&cast_expr.argument, correlated_columns, derived_columns)?;

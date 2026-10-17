@@ -110,10 +110,6 @@ impl DerivedColumnScope {
             .ok_or_else(|| ErrorCode::Internal(format!("Missing derived column {old}")))
     }
 
-    pub(crate) fn visible_symbols(&self) -> Vec<Symbol> {
-        self.snapshot().into_values().collect()
-    }
-
     fn snapshot(&self) -> HashMap<Symbol, Symbol> {
         let mut visible = self.inherited.clone();
         visible.extend(self.local.iter().map(|(&old, &new)| (old, new)));

@@ -17,6 +17,7 @@ use std::borrow::Cow;
 use databend_common_exception::ErrorCode;
 use databend_common_exception::Result;
 use databend_common_expression::aggregate::aggregate_function::RawAggregateCall;
+use databend_common_expression::type_check::wrap_nullable_for_try_cast;
 use databend_common_expression::types::DataType;
 use databend_common_functions::aggregates::AGGR_REGISTRY;
 
@@ -33,6 +34,7 @@ use crate::Symbol;
 use crate::plans::Aggregate;
 use crate::plans::AggregateFunction;
 use crate::plans::BoundColumnRef;
+use crate::plans::CastExpr;
 use crate::plans::FunctionCall;
 use crate::plans::LambdaFunc;
 use crate::plans::Operator;
@@ -52,6 +54,11 @@ impl<K: ExprKind> Expr<K> {
     ///
     /// Nullability is intentionally ignored when comparing a symbol with metadata:
     /// outer joins may add a nullable wrapper without changing the global symbol.
+    ///
+    /// TODO: for the same reason, a column reference whose declared nullability
+    /// went stale after a rewrite changed its producer is not detected. Checking
+    /// it needs the actual type of each operator output, which the logical plan
+    /// does not derive yet.
     pub fn validate_types(&self, metadata: &MetadataRef) -> Result<()> {
         K::validate_types(self, metadata)
     }
@@ -355,6 +362,23 @@ impl ScalarTypeValidator<'_> {
         Ok(())
     }
 
+    /// Lowering resolves a TRY_CAST to the nullable form of its target, so the
+    /// declared target must already be that form. Whether a non-try cast should
+    /// follow its argument's nullability is not recorded, so it is not checked.
+    fn validate_cast(&mut self, cast: &CastExpr) -> Result<()> {
+        if !cast.is_try {
+            return Ok(());
+        }
+        let lowered = wrap_nullable_for_try_cast(cast.span, &cast.target_type)?;
+        if lowered != *cast.target_type {
+            return Err(ErrorCode::Internal(format!(
+                "{} try_cast target type mismatch: stored {:?}, lowered {lowered:?}",
+                self.symbol_types.name, cast.target_type
+            )));
+        }
+        Ok(())
+    }
+
     fn validate_aggregate_function(&mut self, aggregate: &AggregateFunction) -> Result<()> {
         let argument_types = aggregate
             .args
@@ -414,5 +438,10 @@ impl ScalarExprVisitor<'_> for ScalarTypeValidator<'_> {
             self.visit(argument)?;
         }
         Ok(())
+    }
+
+    fn visit_cast(&mut self, cast: &CastExpr) -> Result<()> {
+        self.validate_cast(cast)?;
+        self.visit(&cast.argument)
     }
 }

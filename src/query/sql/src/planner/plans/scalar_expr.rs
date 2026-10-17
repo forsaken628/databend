@@ -342,6 +342,11 @@ impl ScalarExpr {
         ReplaceColumnsVisitor { replace }.visit(self)
     }
 
+    // TODO: `replace_column_binding`, `replace_sub_scalar`, and
+    // `replace_column_with_scalar` keep every enclosing declared type. A
+    // replacement of different type or nullability leaves function, lambda,
+    // cast, aggregate, and window types stale. No query is known to reach this
+    // with a changed type.
     pub fn replace_column_binding(
         &mut self,
         old: Symbol,
@@ -1281,6 +1286,26 @@ pub struct CastExpr {
     pub is_try: bool,
     pub argument: Box<ScalarExpr>,
     pub target_type: Box<DataType>,
+}
+
+impl CastExpr {
+    /// Re-apply the binder's nullability rule for `CAST` after `argument` was
+    /// rewritten from a value of `previous_argument_type`: an argument that
+    /// became nullable makes the target nullable. A cast that already narrowed a
+    /// nullable argument to a non-nullable target is left unchanged.
+    ///
+    /// A cast does not record whether its target follows the argument, as a user
+    /// `CAST` does, or is exact, as a cast to a UDF parameter or an INSERT
+    /// column is. An exact cast of a non-nullable argument to a non-nullable
+    /// target is therefore treated as following the argument.
+    pub fn refresh_target_type(&mut self, previous_argument_type: &DataType) {
+        if !previous_argument_type.is_nullable_or_null()
+            && self.argument.data_type().is_nullable_or_null()
+            && !self.target_type.is_nullable_or_null()
+        {
+            self.target_type = Box::new(self.target_type.wrap_nullable());
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

@@ -1,0 +1,53 @@
+# An `unnest` of an outer column inside a correlated subquery. Flattening the
+# set-returning function must project only the derived columns of its own
+# correlations, not columns inherited from enclosing scopes.
+
+statement ok
+create or replace database subquery_unnest_outer
+
+statement ok
+use subquery_unnest_outer
+
+statement ok
+create table t1(a int not null, arr array(int) not null)
+
+statement ok
+create table t2(a int not null, b int not null, arr array(int) not null)
+
+statement ok
+create table t3(a int not null, b int not null, arr array(int) not null)
+
+statement ok
+insert into t1 values (1, [1, 2]), (2, [3])
+
+statement ok
+insert into t2 values (1, 10, [5, 6])
+
+statement ok
+insert into t3 values (100, 5, [1]), (200, 20, [3])
+
+# The outer column comes from the nullable side of a LEFT JOIN.
+query II
+select t1.a, (
+    select max(u) from (select unnest(t2.arr) as u from t3 where t3.b > t2.b) q
+) from t1 left join t2 on t1.a = t2.a
+order by t1.a
+----
+1 6
+2 NULL
+
+# The correlation key is replaced by the inner column it equals.
+query I
+select t1.a from t1 where exists (
+    select 1 from (select unnest(t1.arr) as d, t3.arr as arr from t3) q
+    where q.arr = t1.arr and q.d > 0
+)
+order by t1.a
+----
+2
+
+statement ok
+use default
+
+statement ok
+drop database subquery_unnest_outer

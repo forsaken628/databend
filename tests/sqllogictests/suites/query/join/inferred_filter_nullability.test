@@ -1,0 +1,61 @@
+# Filters inferred through a join key move a cast from a non-nullable key to a
+# nullable one. The cast target must become nullable as well; otherwise the
+# inferred filter fails on NULL keys before the join removes those rows.
+
+statement ok
+use default
+
+statement ok
+drop table if exists ifn_outer
+
+statement ok
+drop table if exists ifn_inner
+
+statement ok
+create table ifn_outer(a int not null)
+
+statement ok
+create table ifn_inner(n int null, s string null)
+
+statement ok
+insert into ifn_outer values (1), (2)
+
+statement ok
+insert into ifn_inner values (1, 'x'), (null, 'y'), (3, null)
+
+query I
+select o.a from ifn_outer o join (select n from ifn_inner) i on i.n = o.a
+where cast(o.a as string) <> ''
+order by o.a
+----
+1
+
+# Decorrelation keys the subquery by the outer column; the cast over it is then
+# inferred onto the nullable inner column.
+query I
+select o.a from ifn_outer o where exists (
+    select 1 from (select cast(o.a as string) as d, i.n as n from ifn_inner i) q
+    where q.n = o.a and q.d <> ''
+)
+order by o.a
+----
+1
+
+query I
+select o.a from ifn_outer o where exists (
+    select 1 from (
+        select cast(o.a as string) as d, i.n as n from ifn_inner i
+        union all
+        select s, n from ifn_inner
+    ) q
+    where q.n = o.a and q.d <> ''
+)
+order by o.a
+----
+1
+
+statement ok
+drop table ifn_outer
+
+statement ok
+drop table ifn_inner
