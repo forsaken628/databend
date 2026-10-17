@@ -27,8 +27,8 @@ use crate::optimizer::optimizers::operator::SubqueryDecorrelatorOptimizer;
 use crate::optimizer::optimizers::operator::function_call;
 use crate::optimizer::optimizers::operator::match_scalar_aggregate;
 use crate::planner::binder::Binder;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::EvalScalar;
 use crate::plans::Filter;
@@ -152,9 +152,8 @@ impl Binder {
                 span: None,
                 column: column.clone(),
             });
-            let null = ScalarExpr::CastExpr(CastExpr {
+            let null = ScalarExpr::AutoCast(AutoCastExpr {
                 span: None,
-                is_try: false,
                 argument: Box::new(ScalarExpr::ConstantExpr(ConstantExpr {
                     span: None,
                     value: Scalar::Null,

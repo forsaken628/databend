@@ -42,7 +42,7 @@ use super::TypeChecker;
 use crate::binder::ExprContext;
 use crate::plans::AggregateFunction;
 use crate::plans::AggregateFunctionScalarSortDesc;
-use crate::plans::CastExpr;
+use crate::plans::AutoCastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::ScalarExpr;
 
@@ -497,9 +497,8 @@ where A: TypeCheckAdapter
             target_type = target_type.wrap_nullable();
         }
 
-        arguments[0] = ScalarExpr::CastExpr(CastExpr {
+        arguments[0] = ScalarExpr::AutoCast(AutoCastExpr {
             span: arguments[0].span(),
-            is_try: false,
             argument: Box::new(arguments[0].clone()),
             target_type: Box::new(target_type.clone()),
         });

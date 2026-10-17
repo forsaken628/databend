@@ -255,6 +255,9 @@ impl PullUpFilterOptimizer {
             ScalarExpr::CastExpr(cast) => {
                 Self::replace_predicate(&mut cast.argument, items, metadata)?;
             }
+            ScalarExpr::AutoCast(cast) => {
+                Self::replace_predicate(&mut cast.argument, items, metadata)?;
+            }
             ScalarExpr::UDFCall(udf) => {
                 for arg in udf.arguments.iter_mut() {
                     Self::replace_predicate(arg, items, metadata)?;

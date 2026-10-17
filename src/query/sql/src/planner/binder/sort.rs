@@ -31,6 +31,7 @@ use crate::binder::select::SelectClauseFact;
 use crate::binder::window::WindowRewriter;
 use crate::optimizer::ir::SExpr;
 use crate::planner::semantic::GroupingChecker;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
 use crate::plans::CastExpr;
 use crate::plans::FunctionCall;
@@ -372,6 +373,23 @@ impl Binder {
                 Ok(ScalarExpr::CastExpr(CastExpr {
                     span: *span,
                     is_try: *is_try,
+                    argument,
+                    target_type: target_type.clone(),
+                }))
+            }
+            ScalarExpr::AutoCast(AutoCastExpr {
+                span,
+                argument,
+                target_type,
+            }) => {
+                let argument = Box::new(self.rewrite_scalar_with_replacement(
+                    bind_context,
+                    select_info,
+                    argument,
+                    rewrite_flags,
+                )?);
+                Ok(ScalarExpr::AutoCast(AutoCastExpr {
+                    span: *span,
                     argument,
                     target_type: target_type.clone(),
                 }))

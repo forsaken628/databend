@@ -26,6 +26,8 @@ use crate::optimizer::ir::PExpr;
 use crate::optimizer::ir::RelExpr;
 use crate::optimizer::optimizers::rule::RuleID;
 use crate::optimizer::pipeline::OptimizerTraceCollector;
+use crate::plans::AutoCastExpr;
+use crate::plans::CastExpr;
 use crate::plans::EvalScalar;
 use crate::plans::Operator;
 use crate::plans::RelOp;
@@ -132,8 +134,9 @@ impl EliminateEvalScalarOptimizer {
                             }
                         }
                     }
-                    ScalarExpr::CastExpr(cast) => {
-                        if let ScalarExpr::BoundColumnRef(bound_column_ref) = cast.argument.as_ref()
+                    ScalarExpr::CastExpr(CastExpr { argument, .. })
+                    | ScalarExpr::AutoCast(AutoCastExpr { argument, .. }) => {
+                        if let ScalarExpr::BoundColumnRef(bound_column_ref) = argument.as_ref()
                             && bound_column_ref.column.index == item.index
                         {
                             return Ok(None);

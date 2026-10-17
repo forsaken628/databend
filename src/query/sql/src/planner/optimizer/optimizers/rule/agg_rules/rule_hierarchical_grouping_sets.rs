@@ -39,8 +39,8 @@ use crate::optimizer::optimizers::rule::RuleID;
 use crate::optimizer::optimizers::rule::TransformResult;
 use crate::planner::binder::is_grouping_id_item;
 use crate::plans::Aggregate;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::EvalScalar;
 use crate::plans::FunctionCall;
@@ -972,9 +972,8 @@ impl VisitorMut<'_> for GroupingSetsNullVisitor {
             if self.group_indexes.contains(&col.column.index) {
                 // For base CTE, we need to cast to nullable, but use the correct target type
                 // The target type should be UInt64 to match the CTE's actual output type
-                *expr = ScalarExpr::CastExpr(CastExpr {
+                *expr = ScalarExpr::AutoCast(AutoCastExpr {
                     argument: Box::new(old),
-                    is_try: true,
                     target_type: Box::new(col.column.data_type.wrap_nullable()),
                     span: col.span,
                 });

@@ -315,6 +315,9 @@ where A: super::TypeCheckAdapter
                 ScalarExpr::CastExpr(cast) => {
                     classify_scalar_output(s_expr, &cast.argument, outer_columns, visiting)
                 }
+                ScalarExpr::AutoCast(cast) => {
+                    classify_scalar_output(s_expr, &cast.argument, outer_columns, visiting)
+                }
                 ScalarExpr::LambdaFunction(lambda) => {
                     let mut kind = ScalarOutputKind::OuterOnlyNoAggregate;
                     for arg in &lambda.args {

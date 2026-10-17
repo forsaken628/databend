@@ -21,7 +21,6 @@ use databend_common_expression::types::NumberScalar;
 
 use crate::ScalarExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
 
 pub fn check_uint_range(max: u64, value: &Scalar) -> (bool, u64) {
@@ -67,31 +66,27 @@ pub fn remove_trivial_type_cast(left: ScalarExpr, right: ScalarExpr) -> (ScalarE
     let (cast, span, value, cast_on_left) = match (&left, &right) {
         // The constant is converted to the column type, so only its value matters.
         (
-            ScalarExpr::CastExpr(cast),
+            cast @ (ScalarExpr::CastExpr(_) | ScalarExpr::AutoCast(_)),
             ScalarExpr::ConstantExpr(ConstantExpr { span, value })
             | ScalarExpr::TypedConstantExpr(ConstantExpr { span, value }, _),
         ) => (cast, span, value, true),
         (
             ScalarExpr::ConstantExpr(ConstantExpr { span, value })
             | ScalarExpr::TypedConstantExpr(ConstantExpr { span, value }, _),
-            ScalarExpr::CastExpr(cast),
+            cast @ (ScalarExpr::CastExpr(_) | ScalarExpr::AutoCast(_)),
         ) => (cast, span, value, false),
         _ => return (left, right),
     };
 
-    let CastExpr {
-        argument,
-        target_type,
-        is_try,
-        ..
-    } = cast;
-    let ScalarExpr::BoundColumnRef(BoundColumnRef { column, .. }) = &**argument else {
+    let Some((argument, target_type)) = cast.as_non_try_cast() else {
+        return (left, right);
+    };
+    let ScalarExpr::BoundColumnRef(BoundColumnRef { column, .. }) = argument else {
         return (left, right);
     };
     // Removing a cast must preserve both equality and ordering. Narrowing and
     // integer-to-float casts can merge distinct values even if the constant fits.
-    if *is_try
-        || !matches!(target_type.remove_nullable(), DataType::Number(_))
+    if !matches!(target_type.remove_nullable(), DataType::Number(_))
         || !classify_conversion(&column.data_type, target_type).is_lossless_injective()
     {
         return (left, right);
@@ -159,8 +154,8 @@ pub fn remove_trivial_type_cast(left: ScalarExpr, right: ScalarExpr) -> (ScalarE
 
     // Preserve operand order because this helper does not own the comparison operator.
     if cast_on_left {
-        ((**argument).clone(), constant)
+        (argument.clone(), constant)
     } else {
-        (constant, (**argument).clone())
+        (constant, argument.clone())
     }
 }

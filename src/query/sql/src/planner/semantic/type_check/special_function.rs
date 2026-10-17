@@ -32,7 +32,7 @@ use super::SessionFunction;
 use super::TypeChecker;
 use super::rewrite_function::check_function_arity;
 use crate::TypeCheckAdapter;
-use crate::plans::CastExpr;
+use crate::plans::AutoCastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::ScalarExpr;
 
@@ -814,9 +814,8 @@ where A: TypeCheckAdapter
                 scalar.clone(),
             ])?;
         let target_type = DataType::String;
-        let scalar = ScalarExpr::CastExpr(CastExpr {
+        let scalar = ScalarExpr::AutoCast(AutoCastExpr {
             span,
-            is_try: false,
             argument: Box::new(binary),
             target_type: Box::new(target_type.clone()),
         });

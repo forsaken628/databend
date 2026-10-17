@@ -33,8 +33,8 @@ use crate::optimizer::OptimizerContext;
 use crate::optimizer::ir::SExpr;
 use crate::plans::Aggregate;
 use crate::plans::AggregateFunction;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::EvalScalar;
 use crate::plans::Filter;
@@ -363,6 +363,9 @@ impl SubqueryDecorrelatorOptimizer {
             ScalarExpr::CastExpr(cast) => {
                 self.try_rewrite_subquery(&mut cast.argument, outer, false)
             }
+            ScalarExpr::AutoCast(cast) => {
+                self.try_rewrite_subquery(&mut cast.argument, outer, false)
+            }
             ScalarExpr::UDFLambdaCall(udf) => {
                 self.try_rewrite_subquery(&mut udf.scalar, outer, false)
             }
@@ -496,9 +499,8 @@ impl SubqueryDecorrelatorOptimizer {
                         arguments: vec![column_ref.clone()],
                         return_type: Box::new(DataType::Boolean),
                     });
-                    let cast_column_ref_to_uint64 = ScalarExpr::CastExpr(CastExpr {
+                    let cast_column_ref_to_uint64 = ScalarExpr::AutoCast(AutoCastExpr {
                         span: subquery.span,
-                        is_try: true,
                         argument: Box::new(column_ref),
                         target_type: Box::new(
                             DataType::Number(NumberDataType::UInt64).wrap_nullable(),
@@ -508,9 +510,8 @@ impl SubqueryDecorrelatorOptimizer {
                         span: subquery.span,
                         value: Scalar::Number(NumberScalar::UInt8(0)),
                     });
-                    ScalarExpr::CastExpr(CastExpr {
+                    ScalarExpr::AutoCast(AutoCastExpr {
                         span: subquery.span,
-                        is_try: true,
                         argument: Box::new(ScalarExpr::FunctionCall(FunctionCall {
                             span: subquery.span,
                             func_name: "if".to_string(),
@@ -779,8 +780,8 @@ pub fn check_child_expr_in_subquery(
         ScalarExpr::ConstantExpr(_) | ScalarExpr::TypedConstantExpr(_, _) => {
             Ok((child_expr.clone(), true))
         }
-        ScalarExpr::CastExpr(cast) => {
-            let arg = &cast.argument;
+        ScalarExpr::CastExpr(_) | ScalarExpr::AutoCast(_) => {
+            let arg = child_expr.cast_argument().unwrap();
             let (_, is_non_equi_condition) = check_child_expr_in_subquery(arg, op)?;
             Ok((child_expr.clone(), is_non_equi_condition))
         }

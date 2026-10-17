@@ -22,6 +22,7 @@ use databend_common_expression::types::DataType;
 
 use crate::ColumnSet;
 use crate::optimizer::ir::RelationalProperty;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
 use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
@@ -352,7 +353,8 @@ pub fn contain_subquery(scalar: &ScalarExpr) -> bool {
             column.column_name == format!("scalar_subquery_{}", column.index)
         }
         ScalarExpr::FunctionCall(func) => func.arguments.iter().any(contain_subquery),
-        ScalarExpr::CastExpr(CastExpr { argument, .. }) => contain_subquery(argument),
+        ScalarExpr::CastExpr(CastExpr { argument, .. })
+        | ScalarExpr::AutoCast(AutoCastExpr { argument, .. }) => contain_subquery(argument),
         ScalarExpr::UDFCall(udf) => udf.arguments.iter().any(contain_subquery),
         _ => false,
     }
@@ -409,25 +411,14 @@ pub fn prune_by_children(scalar: &ScalarExpr, columns: &HashSet<ScalarExpr>) -> 
 
 /// Wrap a cast expression with given target type
 pub fn wrap_cast(scalar: &ScalarExpr, target_type: &DataType) -> ScalarExpr {
-    ScalarExpr::CastExpr(CastExpr {
-        span: scalar.span(),
-        is_try: false,
-        argument: Box::new(scalar.clone()),
-        target_type: Box::new(target_type.clone()),
-    })
+    ScalarExpr::AutoCast(AutoCastExpr::new(scalar.clone(), target_type.clone()))
 }
 
 pub fn wrap_nullable(scalar: ScalarExpr, source_type: &DataType) -> ScalarExpr {
     if source_type.is_nullable_or_null() {
         scalar
     } else {
-        let target_type = source_type.wrap_nullable();
-        ScalarExpr::CastExpr(CastExpr {
-            span: scalar.span(),
-            is_try: false,
-            argument: Box::new(scalar),
-            target_type: Box::new(target_type),
-        })
+        ScalarExpr::AutoCast(AutoCastExpr::new(scalar, source_type.wrap_nullable()))
     }
 }
 

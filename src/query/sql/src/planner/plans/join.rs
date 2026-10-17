@@ -281,10 +281,8 @@ fn unwrap_integer_to_string_cast<'a>(
     integer_expr: &ScalarExpr,
     string_expr: &'a ScalarExpr,
 ) -> Option<&'a ScalarExpr> {
-    let ScalarExpr::CastExpr(cast) = string_expr else {
-        return None;
-    };
-    if cast.is_try || !matches!(cast.target_type.remove_nullable(), DataType::String) {
+    let (argument, target_type) = string_expr.as_non_try_cast()?;
+    if !matches!(target_type.remove_nullable(), DataType::String) {
         return None;
     }
 
@@ -296,7 +294,7 @@ fn unwrap_integer_to_string_cast<'a>(
         return None;
     }
 
-    let source_type = cast.argument.data_type();
+    let source_type = argument.data_type();
     let DataType::Number(source_type) = source_type.remove_nullable() else {
         return None;
     };
@@ -317,7 +315,7 @@ fn unwrap_integer_to_string_cast<'a>(
     let preserves_equality = classify_conversion(&integer_type, &common_type)
         .is_safe_for_equality_inference()
         && classify_conversion(&source_type, &common_type).is_safe_for_equality_inference();
-    preserves_equality.then_some(cast.argument.as_ref())
+    preserves_equality.then_some(argument)
 }
 
 /// Join operator. We will choose hash join by default.

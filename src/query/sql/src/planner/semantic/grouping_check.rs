@@ -182,6 +182,16 @@ impl VisitorMut<'_> for GroupingChecker<'_> {
         walk_expr_mut(self, expr)
     }
 
+    fn visit_auto_cast_expr(&mut self, cast: &'_ mut crate::plans::AutoCastExpr) -> Result<()> {
+        let source_nullable = cast.argument.data_type().is_nullable();
+        self.visit(&mut cast.argument)?;
+
+        if !source_nullable && cast.argument.data_type().is_nullable() {
+            cast.target_type = Box::new(cast.target_type.wrap_nullable());
+        }
+        Ok(())
+    }
+
     fn visit_cast_expr(&mut self, cast: &'_ mut crate::plans::CastExpr) -> Result<()> {
         let source_nullable = cast.argument.data_type().is_nullable();
         self.visit(&mut cast.argument)?;

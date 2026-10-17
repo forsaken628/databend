@@ -78,7 +78,7 @@ use crate::binder::StageResolver;
 use crate::binder::wrap_cast;
 use crate::planner::expression::UDFValidator;
 use crate::planner::semantic::normalize_identifier;
-use crate::plans::CastExpr;
+use crate::plans::AutoCastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::ScalarExpr;
 use crate::plans::UDAFCall;
@@ -874,13 +874,12 @@ where A: super::TypeCheckAdapter
         self.bind_context.have_async_func |= bind_context.have_async_func;
 
         let (scalar, data_type) = if let Some(return_type) = return_type {
-            let expr = CastExpr {
+            let expr = AutoCastExpr {
                 span,
-                is_try: false,
                 argument: Box::new(scalar),
                 target_type: Box::new(return_type.clone()),
             };
-            (expr.into(), return_type)
+            (ScalarExpr::AutoCast(expr), return_type)
         } else {
             (scalar, data_type)
         };
@@ -1051,8 +1050,9 @@ where A: UdfAdapter
             for arg in &args {
                 let arg_scalar = match arg {
                     ScalarExpr::ConstantExpr(constant) => constant.value.clone(),
-                    ScalarExpr::CastExpr(cast) => {
-                        let constant = ConstantExpr::try_from(*cast.argument.clone()).unwrap();
+                    ScalarExpr::CastExpr(_) | ScalarExpr::AutoCast(_) => {
+                        let argument = arg.cast_argument().unwrap().clone();
+                        let constant = ConstantExpr::try_from(argument).unwrap();
                         constant.value.clone()
                     }
                     _ => unreachable!(),

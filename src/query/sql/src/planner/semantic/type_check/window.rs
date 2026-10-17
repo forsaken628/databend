@@ -42,7 +42,7 @@ use super::TypeCheckAdapter;
 use super::TypeChecker;
 use crate::binder::ExprContext;
 use crate::planner::semantic::normalize_identifier;
-use crate::plans::CastExpr;
+use crate::plans::AutoCastExpr;
 use crate::plans::LagLeadFunction;
 use crate::plans::NthValueFunction;
 use crate::plans::NtileFunction;
@@ -720,9 +720,8 @@ where A: TypeCheckAdapter
         };
 
         let cast_default = default.map(|d| {
-            Box::new(ScalarExpr::CastExpr(CastExpr {
+            Box::new(ScalarExpr::AutoCast(AutoCastExpr {
                 span: d.span(),
-                is_try: false,
                 argument: Box::new(d),
                 target_type: Box::new(return_type.clone()),
             }))

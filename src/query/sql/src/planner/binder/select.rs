@@ -53,8 +53,8 @@ use crate::optimizer::ir::SExpr;
 use crate::planner::binder::BindContext;
 use crate::planner::binder::Binder;
 use crate::planner::binder::scalar::ScalarBinder;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::Filter;
 use crate::plans::JoinType;
 use crate::plans::ScalarExpr;
@@ -796,9 +796,8 @@ impl Binder {
             .enumerate()
         {
             if *left_col.data_type != coercion_types[idx] {
-                let left_coercion_expr = CastExpr {
+                let left_coercion_expr = AutoCastExpr {
                     span: left_span,
-                    is_try: false,
                     argument: Box::new(
                         BoundColumnRef {
                             span: left_span,
@@ -810,16 +809,15 @@ impl Binder {
                 };
                 left_outputs.push((
                     left_col.index,
-                    Some(ScalarExpr::CastExpr(left_coercion_expr)),
+                    Some(ScalarExpr::AutoCast(left_coercion_expr)),
                 ));
             } else {
                 left_outputs.push((left_col.index, None));
             }
 
             if *right_col.data_type != coercion_types[idx] {
-                let right_coercion_expr = CastExpr {
+                let right_coercion_expr = AutoCastExpr {
                     span: right_span,
-                    is_try: false,
                     argument: Box::new(
                         BoundColumnRef {
                             span: right_span,
@@ -831,7 +829,7 @@ impl Binder {
                 };
                 right_outputs.push((
                     right_col.index,
-                    Some(ScalarExpr::CastExpr(right_coercion_expr)),
+                    Some(ScalarExpr::AutoCast(right_coercion_expr)),
                 ));
             } else {
                 right_outputs.push((right_col.index, None));

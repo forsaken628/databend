@@ -109,7 +109,8 @@ impl<'a> VisitorMut<'a> for ExprValuesRewriter {
             | ScalarExpr::ConstantExpr(_)
             | ScalarExpr::TypedConstantExpr(_, _)
             | ScalarExpr::LambdaFunction(_)
-            | ScalarExpr::CastExpr(_) => {}
+            | ScalarExpr::CastExpr(_)
+            | ScalarExpr::AutoCast(_) => {}
             ScalarExpr::UDFLambdaCall(_) => {}
         }
 

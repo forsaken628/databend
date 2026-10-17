@@ -21,6 +21,7 @@ use crate::binder::ColumnBindingBuilder;
 use crate::optimizer::optimizers::operator::SubqueryDecorrelatorOptimizer;
 use crate::plans::AggregateFunction;
 use crate::plans::AggregateFunctionScalarSortDesc;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
 use crate::plans::CastExpr;
 use crate::plans::FunctionCall;
@@ -122,6 +123,15 @@ impl SubqueryDecorrelatorOptimizer {
                 Ok(ScalarExpr::CastExpr(CastExpr {
                     span: cast_expr.span,
                     is_try: cast_expr.is_try,
+                    argument: Box::new(scalar),
+                    target_type: cast_expr.target_type.clone(),
+                }))
+            }
+            ScalarExpr::AutoCast(cast_expr) => {
+                let scalar =
+                    self.flatten_scalar(&cast_expr.argument, correlated_columns, derived_columns)?;
+                Ok(ScalarExpr::AutoCast(AutoCastExpr {
+                    span: cast_expr.span,
                     argument: Box::new(scalar),
                     target_type: cast_expr.target_type.clone(),
                 }))

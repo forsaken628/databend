@@ -73,7 +73,15 @@ pub enum ScalarExpr {
     AggregateFunction(AggregateFunction),
     LambdaFunction(LambdaFunc),
     FunctionCall(FunctionCall),
+    /// A cast the user wrote: `CAST`, `TRY_CAST`, `::`, or a `to_<type>` function
+    /// that resolves to a cast. Its target nullability follows the binder's rule
+    /// for the argument, so a rewrite may re-derive it.
     CastExpr(CastExpr),
+    /// A cast the planner inserted, e.g. a coercion to a common or parameter
+    /// type. It lowers to the same non-try cast as `CAST`, but it is a
+    /// different expression: it never equals a `CastExpr`, and rewrites that
+    /// re-derive a target type from the user's request leave it alone.
+    AutoCast(AutoCastExpr),
     SubqueryExpr(SubqueryExpr),
     UDFCall(UDFCall),
     UDAFCall(UDAFCall),
@@ -95,6 +103,7 @@ impl Clone for ScalarExpr {
             ScalarExpr::LambdaFunction(v) => ScalarExpr::LambdaFunction(v.clone()),
             ScalarExpr::FunctionCall(v) => ScalarExpr::FunctionCall(v.clone()),
             ScalarExpr::CastExpr(v) => ScalarExpr::CastExpr(v.clone()),
+            ScalarExpr::AutoCast(v) => ScalarExpr::AutoCast(v.clone()),
             ScalarExpr::SubqueryExpr(v) => ScalarExpr::SubqueryExpr(v.clone()),
             ScalarExpr::UDFCall(v) => ScalarExpr::UDFCall(v.clone()),
             ScalarExpr::UDFLambdaCall(v) => ScalarExpr::UDFLambdaCall(v.clone()),
@@ -122,6 +131,7 @@ impl PartialEq for ScalarExpr {
             (ScalarExpr::LambdaFunction(l), ScalarExpr::LambdaFunction(r)) => l.eq(r),
             (ScalarExpr::FunctionCall(l), ScalarExpr::FunctionCall(r)) => l.eq(r),
             (ScalarExpr::CastExpr(l), ScalarExpr::CastExpr(r)) => l.eq(r),
+            (ScalarExpr::AutoCast(l), ScalarExpr::AutoCast(r)) => l.eq(r),
             (ScalarExpr::SubqueryExpr(l), ScalarExpr::SubqueryExpr(r)) => l.eq(r),
             (ScalarExpr::UDFCall(l), ScalarExpr::UDFCall(r)) => l.eq(r),
             (ScalarExpr::UDFLambdaCall(l), ScalarExpr::UDFLambdaCall(r)) => l.eq(r),
@@ -150,6 +160,7 @@ impl Hash for ScalarExpr {
             ScalarExpr::LambdaFunction(v) => v.hash(state),
             ScalarExpr::FunctionCall(v) => v.hash(state),
             ScalarExpr::CastExpr(v) => v.hash(state),
+            ScalarExpr::AutoCast(v) => v.hash(state),
             ScalarExpr::SubqueryExpr(v) => v.hash(state),
             ScalarExpr::UDFCall(v) => v.hash(state),
             ScalarExpr::UDFLambdaCall(v) => v.hash(state),
@@ -160,6 +171,25 @@ impl Hash for ScalarExpr {
 }
 
 impl ScalarExpr {
+    /// The argument and target type of a cast that raises an error on failure:
+    /// a non-try `CastExpr` or an `AutoCast`.
+    pub fn as_non_try_cast(&self) -> Option<(&ScalarExpr, &DataType)> {
+        match self {
+            ScalarExpr::CastExpr(cast) if !cast.is_try => Some((&cast.argument, &cast.target_type)),
+            ScalarExpr::AutoCast(cast) => Some((&cast.argument, &cast.target_type)),
+            _ => None,
+        }
+    }
+
+    /// The argument of a cast of either kind.
+    pub fn cast_argument(&self) -> Option<&ScalarExpr> {
+        match self {
+            ScalarExpr::CastExpr(cast) => Some(&cast.argument),
+            ScalarExpr::AutoCast(cast) => Some(&cast.argument),
+            _ => None,
+        }
+    }
+
     pub fn is_aggregate(&self) -> bool {
         matches!(
             self,
@@ -181,6 +211,7 @@ impl ScalarExpr {
             ScalarExpr::LambdaFunction(function) => Cow::Borrowed(function.return_type.as_ref()),
             ScalarExpr::FunctionCall(function) => Cow::Borrowed(function.return_type.as_ref()),
             ScalarExpr::CastExpr(cast) => Cow::Borrowed(cast.target_type.as_ref()),
+            ScalarExpr::AutoCast(cast) => Cow::Borrowed(cast.target_type.as_ref()),
             ScalarExpr::SubqueryExpr(subquery) => Cow::Owned(subquery.output_data_type()),
             ScalarExpr::UDFCall(udf) => Cow::Borrowed(udf.return_type.as_ref()),
             ScalarExpr::UDAFCall(udaf) => Cow::Borrowed(udaf.return_type.as_ref()),
@@ -250,6 +281,7 @@ impl ScalarExpr {
                 func.arguments.iter().all(ScalarExpr::is_deterministic)
             }
             ScalarExpr::CastExpr(cast) => cast.argument.is_deterministic(),
+            ScalarExpr::AutoCast(cast) => cast.argument.is_deterministic(),
             _ => false,
         }
     }
@@ -293,6 +325,7 @@ impl ScalarExpr {
             ScalarExpr::AggregateFunction(expr) => expr.span,
             ScalarExpr::LambdaFunction(expr) => expr.span,
             ScalarExpr::CastExpr(expr) => expr.span.or(expr.argument.span()),
+            ScalarExpr::AutoCast(expr) => expr.span.or(expr.argument.span()),
             ScalarExpr::SubqueryExpr(expr) => expr.span,
             ScalarExpr::UDFCall(expr) => expr.span,
             ScalarExpr::UDFLambdaCall(expr) => expr.span,
@@ -484,20 +517,17 @@ impl ScalarExpr {
             ScalarExpr::ConstantExpr(ref constant_expr) => {
                 let infer_type = constant_expr.value.as_ref().infer_data_type();
                 if &infer_type != data_type {
-                    let cast_expr = CastExpr {
+                    ScalarExpr::AutoCast(AutoCastExpr {
                         span: None,
-                        is_try: false,
                         argument: Box::new(self),
                         target_type: Box::new(data_type.clone()),
-                    };
-                    ScalarExpr::CastExpr(cast_expr)
+                    })
                 } else {
                     self
                 }
             }
-            other => ScalarExpr::CastExpr(CastExpr {
+            other => ScalarExpr::AutoCast(AutoCastExpr {
                 span: None,
-                is_try: false,
                 argument: Box::new(other),
                 target_type: Box::new(data_type.clone()),
             }),
@@ -1293,11 +1323,40 @@ impl CastExpr {
     /// rewritten from a value of `previous_argument_type`: an argument that
     /// became nullable makes the target nullable. A cast that already narrowed a
     /// nullable argument to a non-nullable target is left unchanged.
-    ///
-    /// A cast does not record whether its target follows the argument, as a user
-    /// `CAST` does, or is exact, as a cast to a UDF parameter or an INSERT
-    /// column is. An exact cast of a non-nullable argument to a non-nullable
-    /// target is therefore treated as following the argument.
+    pub fn refresh_target_type(&mut self, previous_argument_type: &DataType) {
+        if !previous_argument_type.is_nullable_or_null()
+            && self.argument.data_type().is_nullable_or_null()
+            && !self.target_type.is_nullable_or_null()
+        {
+            self.target_type = Box::new(self.target_type.wrap_nullable());
+        }
+    }
+}
+
+/// A non-try cast the planner inserted; see `ScalarExpr::AutoCast`.
+#[derive(Clone, Debug, Educe)]
+#[educe(PartialEq, Eq, Hash)]
+pub struct AutoCastExpr {
+    #[educe(Hash(ignore), PartialEq(ignore))]
+    pub span: Span,
+    pub argument: Box<ScalarExpr>,
+    pub target_type: Box<DataType>,
+}
+
+impl AutoCastExpr {
+    /// Wrap `argument` in a cast to `target_type`.
+    pub fn new(argument: ScalarExpr, target_type: DataType) -> Self {
+        AutoCastExpr {
+            span: argument.span(),
+            argument: Box::new(argument),
+            target_type: Box::new(target_type),
+        }
+    }
+
+    /// Widen the target to nullable after `argument` was rewritten from a
+    /// non-nullable `previous_argument_type` to a nullable value, which the
+    /// non-nullable target could not hold. The target is never narrowed: the
+    /// planner chose it, and nothing records how it relates to the argument.
     pub fn refresh_target_type(&mut self, previous_argument_type: &DataType) {
         if !previous_argument_type.is_nullable_or_null()
             && self.argument.data_type().is_nullable_or_null()
@@ -1692,6 +1751,9 @@ pub trait Visitor<'a>: Sized {
         self.visit(&cast.argument)?;
         Ok(())
     }
+    fn visit_auto_cast(&mut self, cast: &'a AutoCastExpr) -> Result<()> {
+        self.visit(&cast.argument)
+    }
     fn visit_subquery(&mut self, subquery: &'a SubqueryExpr) -> Result<()> {
         if let Some(child_expr) = subquery.child_expr.as_ref() {
             self.visit(child_expr)?;
@@ -1735,6 +1797,7 @@ pub fn walk_expr<'a, V: Visitor<'a>>(visitor: &mut V, expr: &'a ScalarExpr) -> R
         ScalarExpr::LambdaFunction(expr) => visitor.visit_lambda_function(expr),
         ScalarExpr::FunctionCall(expr) => visitor.visit_function_call(expr),
         ScalarExpr::CastExpr(expr) => visitor.visit_cast(expr),
+        ScalarExpr::AutoCast(expr) => visitor.visit_auto_cast(expr),
         ScalarExpr::SubqueryExpr(expr) => visitor.visit_subquery(expr),
         ScalarExpr::UDFCall(expr) => visitor.visit_udf_call(expr),
         ScalarExpr::UDFLambdaCall(expr) => visitor.visit_udf_lambda_call(expr),
@@ -1805,6 +1868,9 @@ pub trait VisitorMut<'a>: Sized {
         self.visit(&mut cast.argument)?;
         Ok(())
     }
+    fn visit_auto_cast_expr(&mut self, cast: &'a mut AutoCastExpr) -> Result<()> {
+        self.visit(&mut cast.argument)
+    }
     fn visit_subquery_expr(&mut self, subquery: &'a mut SubqueryExpr) -> Result<()> {
         if let Some(child_expr) = subquery.child_expr.as_mut() {
             self.visit(child_expr)?;
@@ -1851,6 +1917,7 @@ pub fn walk_expr_mut<'a, V: VisitorMut<'a>>(
         ScalarExpr::LambdaFunction(expr) => visitor.visit_lambda_function(expr),
         ScalarExpr::FunctionCall(expr) => visitor.visit_function_call(expr),
         ScalarExpr::CastExpr(expr) => visitor.visit_cast_expr(expr),
+        ScalarExpr::AutoCast(expr) => visitor.visit_auto_cast_expr(expr),
         ScalarExpr::SubqueryExpr(expr) => visitor.visit_subquery_expr(expr),
         ScalarExpr::UDFCall(expr) => visitor.visit_udf_call(expr),
         ScalarExpr::UDFLambdaCall(expr) => visitor.visit_udf_lambda_call(expr),
@@ -1935,7 +2002,10 @@ impl<'a> Visitor<'a> for IndexPredicateChecker {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::hash::Hash;
+    use std::hash::Hasher;
 
+    use databend_common_expression::RawExpr;
     use databend_common_expression::types::number::NumberDataType;
 
     use super::*;
@@ -2147,5 +2217,74 @@ mod tests {
             [Symbol::new(11), Symbol::new(12)].into_iter().collect()
         );
         Ok(())
+    }
+
+    fn hash_of(expr: &ScalarExpr) -> u64 {
+        let mut hasher = std::hash::DefaultHasher::new();
+        expr.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn test_auto_cast_differs_from_cast() {
+        let int64 = DataType::Number(NumberDataType::Int64);
+        let auto = ScalarExpr::AutoCast(AutoCastExpr::new(column_expr(1), int64.clone()));
+        let cast = ScalarExpr::CastExpr(CastExpr {
+            span: None,
+            is_try: false,
+            argument: Box::new(column_expr(1)),
+            target_type: Box::new(int64.clone()),
+        });
+
+        assert_ne!(auto, cast);
+        assert_ne!(cast, auto);
+        assert_ne!(hash_of(&auto), hash_of(&cast));
+        assert_eq!(
+            auto,
+            ScalarExpr::AutoCast(AutoCastExpr::new(column_expr(1), int64))
+        );
+    }
+
+    #[test]
+    fn test_auto_cast_lowers_to_non_try_cast() {
+        let auto = ScalarExpr::AutoCast(AutoCastExpr::new(
+            column_expr(1),
+            DataType::Number(NumberDataType::Int64),
+        ));
+        let RawExpr::Cast {
+            is_try, dest_type, ..
+        } = auto.as_raw_expr()
+        else {
+            panic!("an auto cast lowers to a cast");
+        };
+        assert!(!is_try);
+        assert_eq!(dest_type, DataType::Number(NumberDataType::Int64));
+    }
+
+    #[test]
+    fn test_auto_cast_target_is_widened_but_never_narrowed() {
+        let int64 = DataType::Number(NumberDataType::Int64);
+        let nullable_column = ScalarExpr::BoundColumnRef(BoundColumnRef {
+            span: None,
+            column: ColumnBindingBuilder::new(
+                "c2".to_string(),
+                Symbol::new(2),
+                Box::new(DataType::Number(NumberDataType::Int32).wrap_nullable()),
+                Visibility::Visible,
+            )
+            .build(),
+        });
+
+        let mut widened = AutoCastExpr::new(column_expr(1), int64.clone());
+        let previous = widened.argument.data_type().into_owned();
+        widened.argument = Box::new(nullable_column.clone());
+        widened.refresh_target_type(&previous);
+        assert_eq!(widened.target_type.as_ref(), &int64.wrap_nullable());
+
+        let mut kept = AutoCastExpr::new(nullable_column, int64.wrap_nullable());
+        let previous = kept.argument.data_type().into_owned();
+        kept.argument = Box::new(column_expr(1));
+        kept.refresh_target_type(&previous);
+        assert_eq!(kept.target_type.as_ref(), &int64.wrap_nullable());
     }
 }

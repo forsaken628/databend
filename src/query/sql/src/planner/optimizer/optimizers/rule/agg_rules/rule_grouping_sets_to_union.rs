@@ -35,7 +35,7 @@ use crate::optimizer::optimizers::rule::RuleID;
 use crate::optimizer::optimizers::rule::TransformResult;
 use crate::planner::binder::is_grouping_id_item;
 use crate::plans::Aggregate;
-use crate::plans::CastExpr;
+use crate::plans::AutoCastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::EvalScalar;
 use crate::plans::FunctionCall;
@@ -248,9 +248,8 @@ impl VisitorMut<'_> for ReplaceColumnForGroupingSetsVisitor {
 
         if let ScalarExpr::BoundColumnRef(col) = expr {
             if self.group_indexes.contains(&col.column.index) {
-                *expr = ScalarExpr::CastExpr(CastExpr {
+                *expr = ScalarExpr::AutoCast(AutoCastExpr {
                     argument: Box::new(old),
-                    is_try: true,
                     target_type: Box::new(col.column.data_type.wrap_nullable()),
                     span: col.span,
                 });

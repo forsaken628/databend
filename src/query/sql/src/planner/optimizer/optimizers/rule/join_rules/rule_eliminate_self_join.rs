@@ -438,6 +438,10 @@ impl RuleEliminateSelfJoin {
                     cast.target_type
                 ))
             }
+            ScalarExpr::AutoCast(cast) => {
+                let arg = Self::scalar_signature(&cast.argument, metadata)?;
+                Some(format!("auto_cast({} as {:?})", arg, cast.target_type))
+            }
             ScalarExpr::FunctionCall(func) => {
                 let mut sig = format!("{}({:?}", func.func_name, func.params);
                 for arg in func.arguments.iter() {

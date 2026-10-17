@@ -34,6 +34,7 @@ use crate::optimizer::optimizers::operator::filter::check_float_range;
 use crate::optimizer::optimizers::operator::filter::check_int_range;
 use crate::optimizer::optimizers::operator::filter::check_uint_range;
 use crate::optimizer::optimizers::operator::filter::remove_trivial_type_cast;
+use crate::plans::AutoCastExpr;
 use crate::plans::CastExpr;
 use crate::plans::ComparisonOp;
 use crate::plans::ConstantExpr;
@@ -486,6 +487,7 @@ impl<'a> InferFilterOptimizer<'a> {
                 match expr {
                     ScalarExpr::FunctionCall(expr) => self.visit_function_call(expr),
                     ScalarExpr::CastExpr(expr) => self.visit_cast_expr(expr),
+                    ScalarExpr::AutoCast(expr) => self.visit_auto_cast_expr(expr),
                     ScalarExpr::ConstantExpr(_) | ScalarExpr::TypedConstantExpr(_, _) => Ok(()),
                     ScalarExpr::BoundColumnRef(_)
                     | ScalarExpr::WindowFunction(_)
@@ -528,6 +530,15 @@ impl<'a> InferFilterOptimizer<'a> {
                 {
                     cast.target_type = Box::new(cast.target_type.remove_nullable());
                 }
+                Ok(())
+            }
+
+            // The planner chose the target of an auto cast, so it is only
+            // widened for a nullable argument, never narrowed.
+            fn visit_auto_cast_expr(&mut self, cast: &mut AutoCastExpr) -> Result<()> {
+                let previous_argument_type = cast.argument.data_type().into_owned();
+                self.visit(&mut cast.argument)?;
+                cast.refresh_target_type(&previous_argument_type);
                 Ok(())
             }
         }

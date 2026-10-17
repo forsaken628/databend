@@ -54,8 +54,8 @@ use crate::binder::scalar::ScalarBinder;
 use crate::binder::table_args::bind_table_args;
 use crate::optimizer::ir::SExpr;
 use crate::planner::semantic::normalize_identifier;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::EvalScalar;
 use crate::plans::FunctionCall;
 use crate::plans::Plan;
@@ -220,9 +220,8 @@ impl Binder {
                             span: None,
                             column: output_binding.clone(),
                         });
-                        let cast_expr = ScalarExpr::CastExpr(CastExpr {
+                        let cast_expr = ScalarExpr::AutoCast(AutoCastExpr {
                             span: None,
-                            is_try: false,
                             argument: Box::new(input_expr),
                             target_type: Box::new(return_type.clone()),
                         });

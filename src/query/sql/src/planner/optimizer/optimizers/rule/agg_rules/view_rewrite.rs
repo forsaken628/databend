@@ -310,6 +310,17 @@ impl QueryInfo {
                     return Ok(None);
                 }
             }
+            ScalarExpr::AutoCast(cast) => {
+                if let Some(new_arg) =
+                    self.check_output_cols(&cast.argument, index_output_cols, new_selection_set)?
+                {
+                    let mut new_cast = cast.clone();
+                    new_cast.argument = Box::new(new_arg);
+                    ScalarExpr::AutoCast(new_cast)
+                } else {
+                    return Ok(None);
+                }
+            }
             ScalarExpr::AggregateFunction(func) => {
                 // agg function can't push down
                 for expr in func.exprs() {
@@ -1304,6 +1315,13 @@ pub(crate) fn format_scalar(
             format!(
                 "{}({} as {})",
                 func_name,
+                format_scalar(&cast.argument, column_map),
+                cast.target_type
+            )
+        }
+        ScalarExpr::AutoCast(cast) => {
+            format!(
+                "auto_cast({} as {})",
                 format_scalar(&cast.argument, column_map),
                 cast.target_type
             )

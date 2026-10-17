@@ -40,8 +40,8 @@ use crate::optimizer::ir::SExpr;
 use crate::optimizer::optimizers::operator::FlattenInfo;
 use crate::optimizer::optimizers::operator::SubqueryDecorrelatorOptimizer;
 use crate::optimizer::optimizers::operator::UnnestResult;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::Filter;
 use crate::plans::FunctionCall;
@@ -833,9 +833,8 @@ impl SubqueryDecorrelatorOptimizer {
                             })?;
 
                             let array_argument = if value_type != common_type {
-                                ScalarExpr::CastExpr(CastExpr {
+                                ScalarExpr::AutoCast(AutoCastExpr {
                                     span: subquery.span,
-                                    is_try: false,
                                     argument: Box::new(array_value),
                                     target_type: Box::new(DataType::Array(Box::new(
                                         common_type.clone(),
@@ -845,9 +844,8 @@ impl SubqueryDecorrelatorOptimizer {
                                 array_value
                             };
                             let value_argument = if expr_type != common_type {
-                                ScalarExpr::CastExpr(CastExpr {
+                                ScalarExpr::AutoCast(AutoCastExpr {
                                     span: subquery.span,
-                                    is_try: false,
                                     argument: Box::new(*child_expr.clone()),
                                     target_type: Box::new(common_type.clone()),
                                 })

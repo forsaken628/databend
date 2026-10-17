@@ -1267,16 +1267,14 @@ fn identity_column(expression: &ScalarExpr) -> Option<Symbol> {
 fn null_rejected_column(expression: &ScalarExpr) -> Option<Symbol> {
     match expression {
         ScalarExpr::BoundColumnRef(column) => Some(column.column.index),
-        ScalarExpr::CastExpr(cast) if !cast.is_try => {
-            let source_type = cast.argument.data_type();
-            if classify_conversion(source_type.as_ref(), cast.target_type.as_ref())
-                .is_lossless_injective()
-            {
-                identity_column(&cast.argument)
+        _ => {
+            let (argument, target_type) = expression.as_non_try_cast()?;
+            let source_type = argument.data_type();
+            if classify_conversion(source_type.as_ref(), target_type).is_lossless_injective() {
+                identity_column(argument)
             } else {
                 None
             }
         }
-        _ => None,
     }
 }

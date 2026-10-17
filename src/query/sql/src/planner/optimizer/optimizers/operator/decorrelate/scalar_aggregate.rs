@@ -46,8 +46,8 @@ use crate::optimizer::ir::RelExpr;
 use crate::optimizer::ir::SExpr;
 use crate::plans::Aggregate;
 use crate::plans::AggregateFunction;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::EvalScalar;
 use crate::plans::FunctionCall;
@@ -639,9 +639,8 @@ pub(crate) fn function_call(name: &str, arguments: Vec<ScalarExpr>) -> Result<Sc
 }
 
 fn cast(argument: ScalarExpr, target_type: DataType) -> ScalarExpr {
-    ScalarExpr::CastExpr(CastExpr {
+    ScalarExpr::AutoCast(AutoCastExpr {
         span: None,
-        is_try: false,
         argument: Box::new(argument),
         target_type: Box::new(target_type),
     })

@@ -48,8 +48,8 @@ use crate::ColumnBindingBuilder;
 use crate::Visibility;
 use crate::binder::ExprContext;
 use crate::planner::semantic::lowering::TypeCheck;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
-use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::LambdaFunc;
 use crate::plans::ScalarExpr;
@@ -327,9 +327,8 @@ where A: super::TypeCheckAdapter
                 target_type = target_type.wrap_nullable();
             }
 
-            arg = ScalarExpr::CastExpr(CastExpr {
+            arg = ScalarExpr::AutoCast(AutoCastExpr {
                 span: None,
-                is_try: false,
                 argument: Box::new(arg.clone()),
                 target_type: Box::new(target_type.clone()),
             });
@@ -415,9 +414,8 @@ where A: super::TypeCheckAdapter
             // so if arg_type(origin_type) != target_type(max_type), cast arg
             // for example, if arg = [1INT8, 2INT8, 3INT8], after cast it be [1INT64, 2INT64, 3INT64]
             if arg_type != *target_type {
-                arg = ScalarExpr::CastExpr(CastExpr {
+                arg = ScalarExpr::AutoCast(AutoCastExpr {
                     span: arg.span(),
-                    is_try: false,
                     argument: Box::new(arg),
                     target_type,
                 });
@@ -525,9 +523,8 @@ where A: super::TypeCheckAdapter
             } else {
                 DataType::Variant
             };
-            let result_target_scalar = ScalarExpr::CastExpr(CastExpr {
+            let result_target_scalar = ScalarExpr::AutoCast(AutoCastExpr {
                 span: None,
-                is_try: false,
                 argument: Box::new(lambda_func),
                 target_type: Box::new(result_target_type.clone()),
             });
@@ -645,9 +642,8 @@ where A: super::TypeCheckAdapter
         )?;
 
         let lambda_scalar = if lambda_type != param_type {
-            ScalarExpr::CastExpr(CastExpr {
+            ScalarExpr::AutoCast(AutoCastExpr {
                 span: lambda_scalar.span(),
-                is_try: false,
                 argument: Box::new(lambda_scalar),
                 target_type: Box::new(param_type.clone()),
             })

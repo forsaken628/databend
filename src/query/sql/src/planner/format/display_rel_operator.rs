@@ -179,6 +179,13 @@ fn format_scalar<I: IdHumanizer>(id_humanizer: &I, scalar: &ScalarExpr) -> Strin
                 cast.target_type
             )
         }
+        ScalarExpr::AutoCast(cast) => {
+            format!(
+                "CAST({} AS {})",
+                format_scalar(id_humanizer, &cast.argument),
+                cast.target_type
+            )
+        }
         ScalarExpr::SubqueryExpr(sub) => {
             format!("SUBQUERY AS (#{})", sub.output_column.index)
         }

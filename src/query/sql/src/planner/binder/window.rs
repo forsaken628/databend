@@ -67,7 +67,7 @@ impl WindowInputColumns {
         for item in items {
             if matches!(
                 item.scalar,
-                ScalarExpr::FunctionCall(_) | ScalarExpr::CastExpr(_)
+                ScalarExpr::FunctionCall(_) | ScalarExpr::CastExpr(_) | ScalarExpr::AutoCast(_)
             ) && item.scalar.is_deterministic()
             {
                 self.scalars
@@ -96,6 +96,7 @@ impl VisitorMut<'_> for WindowInputColumns {
                 }
             }
             ScalarExpr::CastExpr(cast) => self.visit(&mut cast.argument)?,
+            ScalarExpr::AutoCast(cast) => self.visit(&mut cast.argument)?,
             _ => {}
         }
         Ok(())

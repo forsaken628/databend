@@ -79,6 +79,7 @@ fn get_nextval(s: &ScalarExpr) -> Option<AsyncFunctionCall> {
             }
         }
         ScalarExpr::CastExpr(c) => get_nextval(&c.argument),
+        ScalarExpr::AutoCast(c) => get_nextval(&c.argument),
         _ => None,
     }
 }

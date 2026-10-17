@@ -365,6 +365,13 @@ pub fn format_scalar(scalar: &ScalarExpr) -> String {
                 cast.target_type
             )
         }
+        ScalarExpr::AutoCast(cast) => {
+            format!(
+                "CAST({} AS {})",
+                format_scalar(&cast.argument),
+                cast.target_type
+            )
+        }
         ScalarExpr::SubqueryExpr(_) => "SUBQUERY".to_string(),
         ScalarExpr::UDFCall(udf) => {
             format!(

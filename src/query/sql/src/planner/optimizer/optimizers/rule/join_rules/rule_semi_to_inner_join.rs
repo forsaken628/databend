@@ -157,8 +157,7 @@ fn visit_group_by_keys(child: &SExpr, visitor: &mut impl FnMut(Symbol, &DataType
 fn join_key_column(condition: &ScalarExpr) -> Option<Symbol> {
     match condition {
         ScalarExpr::BoundColumnRef(c) => Some(c.column.index),
-        ScalarExpr::CastExpr(expr) if !expr.is_try => join_key_column(&expr.argument),
-        _ => None,
+        _ => join_key_column(condition.as_non_try_cast()?.0),
     }
 }
 

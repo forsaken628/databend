@@ -251,6 +251,12 @@ impl ScalarExpr {
                 expr: Box::new(cast.argument.as_raw_expr()),
                 dest_type: (*cast.target_type).clone(),
             },
+            ScalarExpr::AutoCast(cast) => RawExpr::Cast {
+                span: cast.span,
+                is_try: false,
+                expr: Box::new(cast.argument.as_raw_expr()),
+                dest_type: (*cast.target_type).clone(),
+            },
             ScalarExpr::SubqueryExpr(subquery) => RawExpr::ColumnRef {
                 span: subquery.span,
                 id: ColumnBinding::new_dummy_column(
