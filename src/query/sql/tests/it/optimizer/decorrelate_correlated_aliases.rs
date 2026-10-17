@@ -370,6 +370,37 @@ async fn test_decorrelate_correlated_alias_regressions() -> Result<()> {
             ],
             sql: "SELECT * FROM a WHERE a.id = (SELECT id FROM b WHERE a.id = b.id)",
         },
+        SqlTestCase {
+            name: "correlated_window_partitions_input_by_outer_columns",
+            description: "A window without keys in a correlated subquery is partitioned by the outer columns; its input must be sorted and partitioned by them.",
+            setup_sqls: &[
+                "CREATE TABLE window_outer(a INT NOT NULL)",
+                "CREATE TABLE window_inner(n INT NULL)",
+            ],
+            sql: r#"
+        SELECT o.a,
+               (SELECT max(c) FROM (
+                    SELECT count(*) OVER () c FROM window_inner AS i WHERE i.n <= o.a
+               ) q)
+        FROM window_outer AS o
+    "#,
+        },
+        SqlTestCase {
+            name: "correlated_window_extends_existing_partition",
+            description: "The window sort placed by the binder is rebuilt with the outer columns added to its partition keys.",
+            setup_sqls: &[
+                "CREATE TABLE window_outer(a INT NOT NULL)",
+                "CREATE TABLE window_inner(n INT NULL)",
+            ],
+            sql: r#"
+        SELECT o.a,
+               (SELECT max(c) FROM (
+                    SELECT row_number() OVER (PARTITION BY i.n % 2 ORDER BY i.n) c
+                    FROM window_inner AS i WHERE i.n <= o.a
+               ) q)
+        FROM window_outer AS o
+    "#,
+        },
     ];
 
     for case in &cases {

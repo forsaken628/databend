@@ -1,0 +1,89 @@
+# A window function inside a correlated subquery. Decorrelation partitions the
+# window by the outer columns, so the input of the window must also be sorted
+# and partitioned by them; otherwise rows of different outer values interleave
+# and the window computes wrong partitions.
+
+statement ok
+create or replace database subquery_correlated_window
+
+statement ok
+use subquery_correlated_window
+
+statement ok
+create table o(a int not null)
+
+statement ok
+create table i(n int null)
+
+statement ok
+insert into o values (1), (2)
+
+statement ok
+insert into i values (1), (null), (0), (2), (5)
+
+# Without partition or order keys.
+query II
+select o.a, (select max(c) from (select count(*) over () c from i where i.n <= o.a) q)
+from o order by o.a
+----
+1 2
+2 3
+
+# With partition keys.
+query II
+select o.a, (select max(c) from (select count(*) over (partition by i.n % 2) c from i where i.n <= o.a) q)
+from o order by o.a
+----
+1 1
+2 2
+
+# With order keys only.
+query II
+select o.a, (select max(c) from (select row_number() over (order by i.n) c from i where i.n <= o.a) q)
+from o order by o.a
+----
+1 2
+2 3
+
+# A window group with several windows.
+query II
+select o.a, (
+    select max(c) + max(r) from (
+        select count(*) over () c, row_number() over (order by i.n) r from i where i.n <= o.a
+    ) q
+) from o order by o.a
+----
+1 4
+2 6
+
+# The window argument is the outer column.
+query II
+select o.a, (select max(c) from (select sum(o.a) over () c from i where i.n <= o.a) q)
+from o order by o.a
+----
+1 2
+2 6
+
+query II
+select o.a, q.c from o, lateral (select count(*) over () c from i where i.n <= o.a) q
+order by o.a, q.c
+----
+1 2
+1 2
+2 3
+2 3
+2 3
+
+# A correlated LIMIT is rewritten to a row number window.
+query II
+select o.a, (select count(*) from (select i.n from i where i.n <= o.a order by i.n limit 2) q)
+from o order by o.a
+----
+1 2
+2 2
+
+statement ok
+use default
+
+statement ok
+drop database subquery_correlated_window

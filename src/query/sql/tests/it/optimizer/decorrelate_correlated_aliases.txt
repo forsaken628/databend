@@ -586,3 +586,197 @@ EvalScalar
         └── limit: NONE
 
 
+=== correlated_window_partitions_input_by_outer_columns ===
+description: A window without keys in a correlated subquery is partitioned by the outer columns; its input must be sorted and partitioned by them.
+sql: 
+        SELECT o.a,
+               (SELECT max(c) FROM (
+                    SELECT count(*) OVER () c FROM window_inner AS i WHERE i.n <= o.a
+               ) q)
+        FROM window_outer AS o
+    
+raw_plan:
+EvalScalar
+├── scalars: [window_outer.a (#0) AS (#0), SUBQUERY AS (#3) AS (#4)]
+├── subquerys
+│   └── Subquery (Scalar)
+│       ├── output_column: max(c) (#3)
+│       └── EvalScalar
+│           ├── scalars: [max(c) (#3) AS (#3)]
+│           └── Aggregate(Initial)
+│               ├── group items: []
+│               ├── aggregate functions: [max(COUNT(*) OVER () (#2)) AS (#3)]
+│               └── EvalScalar
+│                   ├── scalars: [COUNT(*) OVER () (#2) AS (#2)]
+│                   └── EvalScalar
+│                       ├── scalars: [COUNT(*) OVER () (#2) AS (#2)]
+│                       └── Window
+│                           ├── aggregate function: count
+│                           ├── partition items: []
+│                           ├── order by items: []
+│                           ├── frame: [Range: Preceding(None) ~ Following(None)]
+│                           └── Filter
+│                               ├── filters: [lte(window_inner.n (#1), window_outer.a (#0))]
+│                               └── Scan
+│                                   ├── table: default.window_inner (#1)
+│                                   ├── filters: []
+│                                   ├── order by: []
+│                                   └── limit: NONE
+└── Scan
+    ├── table: default.window_outer (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [window_outer.a (#0) AS (#0), max(c) (#3) AS (#4)]
+└── Join(Right)
+    ├── build keys: [window_outer.a (#0)]
+    ├── probe keys: [a (#5)]
+    ├── other filters: []
+    ├── Scan
+    │   ├── table: default.window_outer (#0)
+    │   ├── filters: []
+    │   ├── order by: []
+    │   └── limit: NONE
+    └── Aggregate(Final)
+        ├── group items: [a (#5) AS (#5)]
+        ├── aggregate functions: [max(COUNT(*) OVER () (#2)) AS (#3)]
+        └── Aggregate(Partial)
+            ├── group items: [a (#5) AS (#5)]
+            ├── aggregate functions: [max(COUNT(*) OVER () (#2)) AS (#3)]
+            └── Window
+                ├── aggregate function: count
+                ├── partition items: [a (#5) AS (#5)]
+                ├── order by items: []
+                ├── frame: [Range: Preceding(None) ~ Following(None)]
+                └── Sort
+                    ├── sort keys: [a (#5) ASC NULLS LAST]
+                    ├── limit: [NONE]
+                    ├── window top: NONE
+                    ├── window function: Aggregate(AggregateFunction { span: Some(85..101), func_name: "count", distinct: false, params: [], args: [], return_type: Number(UInt64), sort_descs: [], display_name: "COUNT(*) OVER ()" })
+                    └── Join(Inner)
+                        ├── build keys: []
+                        ├── probe keys: []
+                        ├── other filters: [lte(window_inner.n (#1), a (#5))]
+                        ├── Scan
+                        │   ├── table: default.window_inner (#1)
+                        │   ├── filters: []
+                        │   ├── order by: []
+                        │   └── limit: NONE
+                        └── Aggregate(Final)
+                            ├── group items: [a (#5) AS (#5)]
+                            ├── aggregate functions: []
+                            └── Aggregate(Partial)
+                                ├── group items: [a (#5) AS (#5)]
+                                ├── aggregate functions: []
+                                └── Scan
+                                    ├── table: default.window_outer (#0)
+                                    ├── filters: []
+                                    ├── order by: []
+                                    └── limit: NONE
+
+
+=== correlated_window_extends_existing_partition ===
+description: The window sort placed by the binder is rebuilt with the outer columns added to its partition keys.
+sql: 
+        SELECT o.a,
+               (SELECT max(c) FROM (
+                    SELECT row_number() OVER (PARTITION BY i.n % 2 ORDER BY i.n) c
+                    FROM window_inner AS i WHERE i.n <= o.a
+               ) q)
+        FROM window_outer AS o
+    
+raw_plan:
+EvalScalar
+├── scalars: [window_outer.a (#0) AS (#0), SUBQUERY AS (#4) AS (#5)]
+├── subquerys
+│   └── Subquery (Scalar)
+│       ├── output_column: max(c) (#4)
+│       └── EvalScalar
+│           ├── scalars: [max(c) (#4) AS (#4)]
+│           └── Aggregate(Initial)
+│               ├── group items: []
+│               ├── aggregate functions: [max(row_number() OVER (PARTITION BY i.n % 2 ORDER BY i.n) (#3)) AS (#4)]
+│               └── EvalScalar
+│                   ├── scalars: [row_number() OVER (PARTITION BY i.n % 2 ORDER BY i.n) (#3) AS (#3)]
+│                   └── EvalScalar
+│                       ├── scalars: [row_number() OVER (PARTITION BY i.n % 2 ORDER BY i.n) (#3) AS (#3)]
+│                       └── Window
+│                           ├── aggregate function: row_number
+│                           ├── partition items: [modulo(window_inner.n (#1), 2) AS (#2)]
+│                           ├── order by items: [window_inner.n (#1) AS (#1)]
+│                           ├── frame: [Range: Preceding(None) ~ CurrentRow]
+│                           └── Sort
+│                               ├── sort keys: [row_number_part_0 (#2) ASC NULLS LAST, window_inner.n (#1) ASC NULLS LAST]
+│                               ├── limit: [NONE]
+│                               ├── window top: NONE
+│                               ├── window function: RowNumber
+│                               └── EvalScalar
+│                                   ├── scalars: [window_inner.n (#1) AS (#1), modulo(window_inner.n (#1), 2) AS (#2)]
+│                                   └── Filter
+│                                       ├── filters: [lte(window_inner.n (#1), window_outer.a (#0))]
+│                                       └── Scan
+│                                           ├── table: default.window_inner (#1)
+│                                           ├── filters: []
+│                                           ├── order by: []
+│                                           └── limit: NONE
+└── Scan
+    ├── table: default.window_outer (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [window_outer.a (#0) AS (#0), max(c) (#4) AS (#5)]
+└── Join(Right)
+    ├── build keys: [window_outer.a (#0)]
+    ├── probe keys: [a (#6)]
+    ├── other filters: []
+    ├── Scan
+    │   ├── table: default.window_outer (#0)
+    │   ├── filters: []
+    │   ├── order by: []
+    │   └── limit: NONE
+    └── Aggregate(Final)
+        ├── group items: [a (#6) AS (#6)]
+        ├── aggregate functions: [max(row_number() OVER (PARTITION BY i.n % 2 ORDER BY i.n) (#3)) AS (#4)]
+        └── Aggregate(Partial)
+            ├── group items: [a (#6) AS (#6)]
+            ├── aggregate functions: [max(row_number() OVER (PARTITION BY i.n % 2 ORDER BY i.n) (#3)) AS (#4)]
+            └── Window
+                ├── aggregate function: row_number
+                ├── partition items: [modulo(window_inner.n (#1), 2) AS (#2), a (#6) AS (#6)]
+                ├── order by items: [window_inner.n (#1) AS (#1)]
+                ├── frame: [Range: Preceding(None) ~ CurrentRow]
+                └── Sort
+                    ├── sort keys: [row_number_part_0 (#2) ASC NULLS LAST, a (#6) ASC NULLS LAST, window_inner.n (#1) ASC NULLS LAST]
+                    ├── limit: [NONE]
+                    ├── window top: NONE
+                    ├── window function: RowNumber
+                    └── EvalScalar
+                        ├── scalars: [window_inner.n (#1) AS (#1), modulo(window_inner.n (#1), 2) AS (#2), a (#6) AS (#6)]
+                        └── Join(Inner)
+                            ├── build keys: []
+                            ├── probe keys: []
+                            ├── other filters: [lte(window_inner.n (#1), a (#6))]
+                            ├── Scan
+                            │   ├── table: default.window_inner (#1)
+                            │   ├── filters: []
+                            │   ├── order by: []
+                            │   └── limit: NONE
+                            └── Aggregate(Final)
+                                ├── group items: [a (#6) AS (#6)]
+                                ├── aggregate functions: []
+                                └── Aggregate(Partial)
+                                    ├── group items: [a (#6) AS (#6)]
+                                    ├── aggregate functions: []
+                                    └── Scan
+                                        ├── table: default.window_outer (#0)
+                                        ├── filters: []
+                                        ├── order by: []
+                                        └── limit: NONE
+
+

@@ -908,7 +908,20 @@ impl SubqueryDecorrelatorOptimizer {
             need_cross_join,
             derived_columns,
         )?;
-        // Check if sort contains `count() or distinct count()`.
+        self.check_sort_count_items(sort, flatten_info);
+        let mut sort = sort.clone();
+        sort.replace_columns(|old| {
+            if correlated_columns.contains(&old) {
+                derived_columns.must_resolve(old)
+            } else {
+                Ok(old)
+            }
+        })?;
+        Ok((flatten_plan.build_unary(sort), derived_columns))
+    }
+
+    /// Check if sort contains `count() or distinct count()`.
+    fn check_sort_count_items(&self, sort: &Sort, flatten_info: &mut FlattenInfo) {
         if sort.items.iter().any(|item| {
             let metadata = self.ctx.metadata_read();
             let col = metadata.column(item.index);
@@ -921,15 +934,6 @@ impl SubqueryDecorrelatorOptimizer {
         }) {
             flatten_info.from_count_func = false;
         }
-        let mut sort = sort.clone();
-        sort.replace_columns(|old| {
-            if correlated_columns.contains(&old) {
-                derived_columns.must_resolve(old)
-            } else {
-                Ok(old)
-            }
-        })?;
-        Ok((flatten_plan.build_unary(sort), derived_columns))
     }
 
     fn flatten_sub_limit(
@@ -1017,28 +1021,6 @@ impl SubqueryDecorrelatorOptimizer {
             row_number_type.clone(),
         );
 
-        let sort_settings = self.ctx.get_table_ctx().get_settings();
-        let default_nulls_first = sort_settings.get_nulls_first();
-
-        let mut sort_items = Vec::with_capacity(partition_by.len() + order_by.len());
-        for part in &partition_by {
-            sort_items.push(SortItem {
-                index: part.index,
-                asc: true,
-                nulls_first: default_nulls_first(true),
-            });
-        }
-        for order in &order_by {
-            let asc = order.asc.unwrap_or(true);
-            sort_items.push(SortItem {
-                index: order.order_by_item.index,
-                asc,
-                nulls_first: order
-                    .nulls_first
-                    .unwrap_or_else(|| default_nulls_first(asc)),
-            });
-        }
-
         let window_plan = Window {
             span: None,
             index: row_number_index,
@@ -1055,25 +1037,11 @@ impl SubqueryDecorrelatorOptimizer {
             top: None,
         };
 
-        let window_child = if sort_items.is_empty() {
-            flatten_plan
-        } else {
-            flatten_plan.build_unary(Sort {
-                items: sort_items,
-                limit: None,
-                after_exchange: None,
-                pre_projection: None,
-                window_partition: if partition_by.is_empty() {
-                    None
-                } else {
-                    Some(WindowPartition {
-                        partition_by: partition_by.clone(),
-                        top: None,
-                        func: WindowFuncType::RowNumber,
-                    })
-                },
-            })
-        };
+        let window_child =
+            match self.window_sort(&partition_by, &order_by, &WindowFuncType::RowNumber) {
+                Some(sort) => flatten_plan.build_unary(sort),
+                None => flatten_plan,
+            };
 
         let row_number_column = ScalarExpr::BoundColumnRef(BoundColumnRef {
             span: None,
@@ -1239,17 +1207,93 @@ impl SubqueryDecorrelatorOptimizer {
         flatten_info: &mut FlattenInfo,
         derived_columns: &DerivedColumnScope,
     ) -> Result<FlattenPlanResult> {
+        // The binder sorts the input of a single window by its partition and
+        // order keys, and that sort also partitions the input for the window.
+        // Flattening adds the outer columns to the partition keys, so the sort
+        // is rebuilt for the flattened window instead of being flattened as is.
+        let window_input = subquery.unary_child();
+        let sort_input = match window_input.plan() {
+            RelOperator::Sort(sort) if Self::is_window_sort(window, sort) => {
+                self.check_sort_count_items(sort, flatten_info);
+                window_input.unary_child()
+            }
+            _ => window_input,
+        };
         let (flatten_plan, derived_columns) = self.flatten_plan_with_scope(
             outer,
-            subquery.unary_child(),
+            sort_input,
             correlated_columns,
             flatten_info,
             true,
             derived_columns,
         )?;
         let window = self.flatten_window(window, correlated_columns, &derived_columns)?;
+        let flatten_plan =
+            match self.window_sort(&window.partition_by, &window.order_by, &window.function) {
+                Some(sort) => flatten_plan.build_unary(sort),
+                None => flatten_plan,
+            };
 
         Ok((flatten_plan.build_unary(window), derived_columns))
+    }
+
+    /// Whether `sort` is the sort the binder places below `window`: its items
+    /// are the partition keys followed by the order keys, without a limit.
+    fn is_window_sort(window: &Window, sort: &Sort) -> bool {
+        let window_keys = window.partition_by.iter().map(|item| item.index).chain(
+            window
+                .order_by
+                .iter()
+                .map(|order| order.order_by_item.index),
+        );
+        !sort.items.is_empty()
+            && sort.limit.is_none()
+            && sort.items.iter().map(|item| item.index).eq(window_keys)
+    }
+
+    /// Build the sort that orders and partitions the input of a window, as the
+    /// binder does, or `None` when the window has neither partition nor order
+    /// keys.
+    fn window_sort(
+        &self,
+        partition_by: &[ScalarItem],
+        order_by: &[WindowOrderByInfo],
+        function: &WindowFuncType,
+    ) -> Option<Sort> {
+        if partition_by.is_empty() && order_by.is_empty() {
+            return None;
+        }
+        let settings = self.ctx.get_table_ctx().get_settings();
+        let default_nulls_first = settings.get_nulls_first();
+        let mut items = Vec::with_capacity(partition_by.len() + order_by.len());
+        for part in partition_by {
+            items.push(SortItem {
+                index: part.index,
+                asc: true,
+                nulls_first: default_nulls_first(true),
+            });
+        }
+        for order in order_by {
+            let asc = order.asc.unwrap_or(true);
+            items.push(SortItem {
+                index: order.order_by_item.index,
+                asc,
+                nulls_first: order
+                    .nulls_first
+                    .unwrap_or_else(|| default_nulls_first(asc)),
+            });
+        }
+        Some(Sort {
+            items,
+            limit: None,
+            after_exchange: None,
+            pre_projection: None,
+            window_partition: (!partition_by.is_empty()).then(|| WindowPartition {
+                partition_by: partition_by.to_vec(),
+                top: None,
+                func: function.clone(),
+            }),
+        })
     }
 
     fn flatten_sub_window_group(
