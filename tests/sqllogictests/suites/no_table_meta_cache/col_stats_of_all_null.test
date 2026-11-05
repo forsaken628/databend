@@ -12,6 +12,7 @@ statement ok
 insert into t values(NULL);
 
 # segments should be pruned
+# c holds only NULLs, so the comparison is estimated at 0 rows.
 query T
 explain select * from t where c > 6;
 ----
