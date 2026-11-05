@@ -239,8 +239,22 @@ impl CollectStatisticsOptimizer {
                         .table_ctx
                         .get_settings()
                         .get_enable_heavy_hitter_aggregate()?;
+                let scan_rows = table_stats
+                    .as_ref()
+                    .and_then(|stats| stats.num_rows)
+                    .filter(|&rows| rows > 0);
+                // A scan can turn a null count equal to its row count into an
+                // exact all-NULL fact. Only plain scans with matching row
+                // counts describe the same rows as the provider statistics.
+                let use_all_null_stats = scan.change_type.is_none()
+                    && !table.is_stream()
+                    && !table.has_changes_source()
+                    && scan_rows.is_some()
+                    && column_statistics_provider.num_rows() == scan_rows;
                 for column in &columns {
-                    let col_stat = column_statistics_provider.column_statistics(column.id);
+                    let col_stat = column_statistics_provider
+                        .column_statistics(column.id)
+                        .filter(|stat| use_all_null_stats || Some(stat.null_count()) != scan_rows);
                     column_stats.insert(
                         column.index,
                         col_stat.cloned().map(|basic| ScanColumnStatistics {
