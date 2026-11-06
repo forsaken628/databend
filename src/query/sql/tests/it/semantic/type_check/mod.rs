@@ -386,14 +386,14 @@ fn resolve_type_check_sql_with_aliases(
 
     let name_resolution_ctx = NameResolutionContext::try_from(adapter.settings.as_ref())?;
     let metadata = Arc::new(RwLock::new(Metadata::default()));
-    let mut type_checker = TypeChecker::try_create_with_adapter(
+    let mut binder = databend_common_sql::binder::ScalarBinder::with_adapter(
         bind_context,
         adapter,
         &name_resolution_ctx,
         metadata,
         aliases,
-    )?;
-    type_checker.resolve(&expr).map(|resolved| *resolved)
+    );
+    binder.bind(&expr)
 }
 
 /// The outcome of binding `case`. The type returned with a bound expression,
@@ -511,6 +511,7 @@ async fn run_type_check_cases_with_settings(
 
 mod aggregate;
 mod async_functions;
+mod auto_cast;
 mod column;
 mod core_expr;
 mod date;

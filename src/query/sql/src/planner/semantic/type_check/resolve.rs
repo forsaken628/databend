@@ -95,6 +95,10 @@ where A: TypeCheckAdapter
         self.forbid_virtual_computed_column = forbid;
     }
 
+    pub(crate) fn function_context(&self) -> &databend_common_expression::FunctionContext {
+        &self.func_ctx
+    }
+
     pub(super) fn core_expr_arena(&self) -> CoreExprArena<'a> {
         CoreExprArena::with_aggregate_function_registry(
             self.func_ctx.week_start as u64,

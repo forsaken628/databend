@@ -1,0 +1,126 @@
+=== filter ===
+description: Narrow a representable literal before relational filter normalization.
+sql: SELECT i FROM cast_pipeline WHERE i > 1::Int64 AND i < 100::Int64
+raw_plan:
+EvalScalar
+├── scalars: [cast_pipeline.i (#0) AS (#0)]
+└── Filter
+    ├── filters: [gt(cast_pipeline.i (#0), 1), lt(cast_pipeline.i (#0), 100)]
+    └── Scan
+        ├── table: default.cast_pipeline (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.cast_pipeline (#0)
+├── filters: [gt(cast_pipeline.i (#0), 1), lt(cast_pipeline.i (#0), 100)]
+├── order by: []
+└── limit: NONE
+
+=== projection ===
+description: Keep the enclosing IF expression and its nullable result contract.
+sql: SELECT if(i > 1::Int64, big, 0) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [if(gt(cast_pipeline.i (#0), 1), cast_pipeline.big (#1), 0) AS (#3)]
+└── Scan
+    ├── table: default.cast_pipeline (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [if(gt(cast_pipeline.i (#0), 1), cast_pipeline.big (#1), 0) AS (#3)]
+└── Scan
+    ├── table: default.cast_pipeline (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+=== range_guard ===
+description: Keep the widening column conversion for an out-of-range literal.
+sql: SELECT i FROM cast_pipeline WHERE i < 9223372036854775807::Int64
+raw_plan:
+EvalScalar
+├── scalars: [cast_pipeline.i (#0) AS (#0)]
+└── Filter
+    ├── filters: [lt(CAST(cast_pipeline.i (#0) AS Int64 NULL), 9223372036854775807)]
+    └── Scan
+        ├── table: default.cast_pipeline (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.cast_pipeline (#0)
+├── filters: [lt(CAST(cast_pipeline.i (#0) AS Int64 NULL), 9223372036854775807)]
+├── order by: []
+└── limit: NONE
+
+=== lossy_guard ===
+description: Do not replace the non-injective Int64 to Float64 comparison.
+sql: SELECT big FROM cast_pipeline WHERE big = 9007199254740992::Float64
+raw_plan:
+EvalScalar
+├── scalars: [cast_pipeline.big (#1) AS (#1)]
+└── Filter
+    ├── filters: [eq(CAST(cast_pipeline.big (#1) AS Float64 NULL), 9007199254740992)]
+    └── Scan
+        ├── table: default.cast_pipeline (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.cast_pipeline (#0)
+├── filters: [eq(CAST(cast_pipeline.big (#1) AS Float64 NULL), 9007199254740992)]
+├── order by: []
+└── limit: NONE
+
+=== explicit_guard ===
+description: The scalar boundary keeps the explicit cast; later normalization may safely eliminate it.
+sql: SELECT i FROM cast_pipeline WHERE CAST(i AS Int64) > 1::Int64
+raw_plan:
+EvalScalar
+├── scalars: [cast_pipeline.i (#0) AS (#0)]
+└── Filter
+    ├── filters: [gt(CAST(cast_pipeline.i (#0) AS Int64 NULL), 1)]
+    └── Scan
+        ├── table: default.cast_pipeline (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.cast_pipeline (#0)
+├── filters: [gt(cast_pipeline.i (#0), 1)]
+├── order by: []
+└── limit: NONE
+
+=== lambda_region ===
+description: The body is optimized before compilation, independently of lambda inputs.
+sql: SELECT array_transform(a, x -> x > 1::Int64) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [array_transform(cast_pipeline.a (#2), ["x"] -> x (#3) > 1) AS (#3)]
+└── Scan
+    ├── table: default.cast_pipeline (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [array_transform(cast_pipeline.a (#2), ["x"] -> x (#3) > 1) AS (#3)]
+└── Scan
+    ├── table: default.cast_pipeline (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+

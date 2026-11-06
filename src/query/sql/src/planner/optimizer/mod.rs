@@ -24,6 +24,7 @@ mod optimizer_context;
 pub mod optimizers;
 mod physical_planner;
 pub mod pipeline;
+pub mod scalar;
 mod statistics;
 
 pub use optimizer::optimize;

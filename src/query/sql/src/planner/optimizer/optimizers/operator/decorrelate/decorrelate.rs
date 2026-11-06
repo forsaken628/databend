@@ -21,6 +21,7 @@ use databend_common_exception::Result;
 use databend_common_expression::ColumnBuilder;
 use databend_common_expression::Scalar;
 use databend_common_expression::ScalarRef;
+use databend_common_expression::conversion::classify_conversion;
 use databend_common_expression::type_check::common_super_type;
 use databend_common_expression::types::DataType;
 use databend_common_expression::types::NumberScalar;
@@ -54,6 +55,29 @@ use crate::plans::ScalarExpr;
 use crate::plans::SubqueryComparisonOp;
 use crate::plans::SubqueryExpr;
 use crate::plans::SubqueryType;
+
+// Binding now materializes inferred coercions. Keep recognizing the same
+// column equality through numeric widening/nullability wrappers, but never
+// infer an alias through a lossy or explicit conversion.
+fn implicit_column(mut scalar: &ScalarExpr) -> Option<&BoundColumnRef> {
+    while let ScalarExpr::AutoCast(cast) = scalar {
+        let source = cast.argument.data_type();
+        let source_value = source.remove_nullable();
+        let target_value = cast.target_type.remove_nullable();
+        if !classify_conversion(&source, &cast.target_type).is_lossless_injective()
+            || (source_value != target_value
+                && !(matches!(source_value, DataType::Number(_) | DataType::Decimal(_))
+                    && matches!(target_value, DataType::Number(_) | DataType::Decimal(_))))
+        {
+            return None;
+        }
+        scalar = &cast.argument;
+    }
+    match scalar {
+        ScalarExpr::BoundColumnRef(column) => Some(column),
+        _ => None,
+    }
+}
 
 impl SubqueryDecorrelatorOptimizer {
     fn matches_simple_subquery_input(s_expr: &SExpr) -> bool {
@@ -566,8 +590,10 @@ impl SubqueryDecorrelatorOptimizer {
             }
             if let ScalarExpr::FunctionCall(func) = predicate
                 && func.func_name == "eq"
-                && let (ScalarExpr::BoundColumnRef(left), ScalarExpr::BoundColumnRef(right)) =
-                    (&func.arguments[0], &func.arguments[1])
+                && let (Some(left), Some(right)) = (
+                    implicit_column(&func.arguments[0]),
+                    implicit_column(&func.arguments[1]),
+                )
             {
                 if correlated_columns.contains(&left.column.index)
                     && !correlated_columns.contains(&right.column.index)
@@ -941,5 +967,69 @@ impl SubqueryDecorrelatorOptimizer {
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use databend_common_expression::types::NumberDataType;
+
+    use super::*;
+    use crate::Symbol;
+    use crate::plans::CastExpr;
+
+    #[test]
+    fn inferred_equality_columns_require_lossless_numeric_casts() {
+        let column = |data_type| {
+            ScalarExpr::BoundColumnRef(BoundColumnRef {
+                span: None,
+                column: ColumnBindingBuilder::new(
+                    "c".to_string(),
+                    Symbol::new(0),
+                    Box::new(data_type),
+                    Visibility::Visible,
+                )
+                .build(),
+            })
+        };
+        for (source, target, expected) in [
+            (
+                DataType::Number(NumberDataType::Int32).wrap_nullable(),
+                DataType::Number(NumberDataType::Int64).wrap_nullable(),
+                true,
+            ),
+            (
+                DataType::Number(NumberDataType::Int64),
+                DataType::Number(NumberDataType::Float64),
+                false,
+            ),
+            (
+                DataType::Number(NumberDataType::UInt64),
+                DataType::Number(NumberDataType::Int64),
+                false,
+            ),
+            (DataType::String, DataType::String.wrap_nullable(), true),
+            (
+                DataType::Number(NumberDataType::Int32),
+                DataType::String,
+                false,
+            ),
+        ] {
+            let inferred =
+                ScalarExpr::AutoCast(AutoCastExpr::new(column(source.clone()), target.clone()));
+            assert_eq!(
+                implicit_column(&inferred).is_some(),
+                expected,
+                "{source} -> {target}"
+            );
+            let explicit: ScalarExpr = CastExpr {
+                span: None,
+                is_try: false,
+                argument: Box::new(column(source)),
+                target_type: Box::new(target),
+            }
+            .into();
+            assert!(implicit_column(&explicit).is_none());
+        }
     }
 }

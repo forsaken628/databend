@@ -48,12 +48,69 @@ use crate::visit_expr;
 
 const MAX_FUNCTION_MISMATCH_HINT_CANDIDATES: usize = 10;
 
-#[recursive::recursive]
+/// Constraints for type inference, independent of expression optimization.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CheckOptions {
+    /// Existing casts remain valid, but inference may not insert a new cast
+    /// around a runtime input. Used to validate an expression rewrite.
+    pub forbid_column_casts: bool,
+    /// Lower an already typed representation. An exact signature records the
+    /// binder's choice; use coercion only for nodes constructed without casts.
+    pub prefer_exact_arguments: bool,
+}
+
+/// The inferred types of one source node, in source-tree postorder.
+/// Another representation can materialize implicit conversions from these
+/// annotations without resolving its nodes a second time.
+#[derive(Debug)]
+pub struct CheckedNode {
+    pub data_type: DataType,
+    pub arguments: Option<Vec<CheckedArgument>>,
+}
+
+#[derive(Debug)]
+pub struct CheckedArgument {
+    pub data_type: DataType,
+    pub is_try: bool,
+    pub constant: Option<Scalar>,
+}
+
 pub fn check<Index: ColumnIndex>(
     expr: &RawExpr<Index>,
     fn_registry: &FunctionRegistry,
 ) -> Result<Expr<Index>> {
-    match expr {
+    check_impl(expr, fn_registry, CheckOptions::default(), &mut None)
+}
+
+pub fn check_with_options<Index: ColumnIndex>(
+    expr: &RawExpr<Index>,
+    fn_registry: &FunctionRegistry,
+    options: CheckOptions,
+) -> Result<Expr<Index>> {
+    check_impl(expr, fn_registry, options, &mut None)
+}
+
+/// Check the complete expression under inference constraints, also returning
+/// source-node types. Annotations are produced during inference, not by a
+/// subsequent traversal that resolves overloads again.
+pub fn check_with_types<Index: ColumnIndex>(
+    expr: &RawExpr<Index>,
+    fn_registry: &FunctionRegistry,
+    options: CheckOptions,
+) -> Result<(Expr<Index>, Vec<CheckedNode>)> {
+    let mut nodes = Some(Vec::new());
+    let checked = check_impl(expr, fn_registry, options, &mut nodes)?;
+    Ok((checked, nodes.unwrap()))
+}
+
+#[recursive::recursive]
+fn check_impl<Index: ColumnIndex>(
+    expr: &RawExpr<Index>,
+    fn_registry: &FunctionRegistry,
+    options: CheckOptions,
+    nodes: &mut Option<Vec<CheckedNode>>,
+) -> Result<Expr<Index>> {
+    let checked: Expr<Index> = match expr {
         RawExpr::Constant {
             span,
             scalar,
@@ -85,7 +142,7 @@ pub fn check<Index: ColumnIndex>(
             expr,
             dest_type,
         } => {
-            let expr = check(expr, fn_registry)?;
+            let expr = check_impl(expr, fn_registry, options, nodes)?;
             check_cast(*span, *is_try, expr, dest_type, fn_registry)
         }
         RawExpr::FunctionCall {
@@ -96,7 +153,7 @@ pub fn check<Index: ColumnIndex>(
         } => {
             let mut args_expr: Vec<_> = args
                 .iter()
-                .map(|arg| check(arg, fn_registry))
+                .map(|arg| check_impl(arg, fn_registry, options, nodes))
                 .try_collect()?;
 
             // https://github.com/datafuselabs/databend/issues/11541
@@ -136,7 +193,7 @@ pub fn check<Index: ColumnIndex>(
                 }
             }
 
-            check_function(*span, name, params, &args_expr, fn_registry)
+            check_function_impl(*span, name, params, &args_expr, fn_registry, options)
         }
         RawExpr::LambdaFunctionCall {
             span,
@@ -148,7 +205,7 @@ pub fn check<Index: ColumnIndex>(
         } => {
             let args: Vec<_> = args
                 .iter()
-                .map(|arg| check(arg, fn_registry))
+                .map(|arg| check_impl(arg, fn_registry, options, nodes))
                 .try_collect()?;
 
             Ok(LambdaFunctionCall {
@@ -161,7 +218,36 @@ pub fn check<Index: ColumnIndex>(
             }
             .into())
         }
+    }?;
+    if let Some(nodes) = nodes {
+        let arguments = match (expr, &checked) {
+            (RawExpr::FunctionCall { name, .. }, Expr::FunctionCall(call)) => {
+                let mut name = name.as_str();
+                while let Some(original) = fn_registry.aliases.get(name) {
+                    name = original;
+                }
+                (name == call.function.signature.name).then(|| {
+                    call.args
+                        .iter()
+                        .map(|arg| CheckedArgument {
+                            data_type: arg.data_type().clone(),
+                            is_try: matches!(arg, Expr::Cast(cast) if cast.is_try),
+                            constant: match arg {
+                                Expr::Constant(constant) => Some(constant.scalar.clone()),
+                                _ => None,
+                            },
+                        })
+                        .collect()
+                })
+            }
+            _ => None,
+        };
+        nodes.push(CheckedNode {
+            data_type: checked.data_type().clone(),
+            arguments,
+        });
     }
+    Ok(checked)
 }
 
 pub fn check_cast<Index: ColumnIndex>(
@@ -310,7 +396,6 @@ pub fn check_number<T: Number, Index: ColumnIndex>(
     }
 }
 
-#[recursive::recursive]
 pub fn check_function<Index: ColumnIndex>(
     span: Span,
     name: &str,
@@ -318,8 +403,27 @@ pub fn check_function<Index: ColumnIndex>(
     args: &[Expr<Index>],
     fn_registry: &FunctionRegistry,
 ) -> Result<Expr<Index>> {
+    check_function_impl(
+        span,
+        name,
+        params,
+        args,
+        fn_registry,
+        CheckOptions::default(),
+    )
+}
+
+#[recursive::recursive]
+fn check_function_impl<Index: ColumnIndex>(
+    span: Span,
+    name: &str,
+    params: &[Scalar],
+    args: &[Expr<Index>],
+    fn_registry: &FunctionRegistry,
+    options: CheckOptions,
+) -> Result<Expr<Index>> {
     if let Some(original_fn_name) = fn_registry.aliases.get(name) {
-        return check_function(span, original_fn_name, params, args, fn_registry);
+        return check_function_impl(span, original_fn_name, params, args, fn_registry, options);
     }
 
     // to_string('a')
@@ -358,14 +462,8 @@ pub fn check_function<Index: ColumnIndex>(
     let dynamic_cast_rules = fn_registry.get_dynamic_cast_rules(name);
 
     let mut fail_reasons = SmallVec::<[_; 1]>::with_capacity(candidates.len());
-    let mut checked_candidates = vec![];
-    let need_sort = candidates.len() > 1 && args.iter().any(|arg| !arg.contains_column_ref());
-    let args_with_column = need_sort.then(|| {
-        args.iter()
-            .map(Expr::contains_column_ref)
-            .collect::<Vec<_>>()
-    });
-    for (seq, (id, func)) in candidates.iter().enumerate() {
+    let mut first_coerced = None;
+    for (id, func) in &candidates {
         match try_check_function(
             args,
             &func.signature,
@@ -373,44 +471,43 @@ pub fn check_function<Index: ColumnIndex>(
             &dynamic_cast_rules,
             fn_registry,
         ) {
-            Ok((args, return_type, generics)) => {
-                let score = if need_sort {
-                    args.iter()
-                        .zip(args_with_column.as_deref().unwrap().iter().copied())
-                        .map(|(expr, contains_column)| {
-                            // smaller score win
-                            if contains_column && expr.is_cast() {
-                                1
-                            } else {
-                                0
-                            }
-                        })
-                        .sum::<usize>()
-                } else {
-                    0
-                };
-                let expr = Expr::FunctionCall(FunctionCall {
+            Ok((checked_args, return_type, generics)) => {
+                if options.forbid_column_casts
+                    && args.iter().zip(&checked_args).any(|(source, checked)| {
+                        source.contains_column_ref() && source.data_type() != checked.data_type()
+                    })
+                {
+                    fail_reasons.push(ErrorCode::SemanticError(
+                        "signature requires an implicit cast of a runtime input",
+                    ));
+                    continue;
+                }
+                let exact = args
+                    .iter()
+                    .zip(&checked_args)
+                    .all(|(source, checked)| source.data_type() == checked.data_type());
+                let checked = Expr::FunctionCall(FunctionCall {
                     span,
                     id: Box::new(id.clone()),
                     function: func.clone(),
                     generics,
-                    args,
+                    args: checked_args,
                     return_type,
                 });
-                if !need_sort {
-                    return Ok(expr);
+                if !options.prefer_exact_arguments || exact {
+                    return Ok(checked);
                 }
-                checked_candidates.push((expr, score, seq));
+                if first_coerced.is_none() {
+                    first_coerced = Some(checked);
+                }
             }
             Err(err) => fail_reasons.push(err),
         }
     }
 
-    if !checked_candidates.is_empty() {
-        checked_candidates.sort_by_key(|(_, score, seq)| std::cmp::Reverse((*score, *seq)));
-        return Ok(checked_candidates.pop().unwrap().0);
+    if let Some(checked) = first_coerced {
+        return Ok(checked);
     }
-
     let mut msg = format_no_matching_function_signature(name, params, args);
 
     if !candidates.is_empty() {
@@ -464,7 +561,13 @@ where
             })
         })
         .collect::<Vec<_>>();
-    Ok(check_function(span, name, params, &arguments, fn_registry)?.into_data_type())
+    Ok(
+        check_function_impl(span, name, params, &arguments, fn_registry, CheckOptions {
+            prefer_exact_arguments: true,
+            ..Default::default()
+        })?
+        .into_data_type(),
+    )
 }
 
 fn format_function_signature<Index: ColumnIndex>(

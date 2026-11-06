@@ -1,0 +1,53 @@
+# Whole-expression implicit conversion rewrites must preserve NULLs, overflow
+# behavior and explicit/lossy conversions.
+statement ok
+CREATE TABLE auto_cast_rules(i Int32 NULL, big Int64 NULL)
+
+statement ok
+INSERT INTO auto_cast_rules VALUES (1, 9007199254740992), (2, 9007199254740993), (NULL, NULL)
+
+query I
+SELECT count(*) FROM auto_cast_rules WHERE i > 1::Int64
+----
+1
+
+query I
+SELECT count(*) FROM auto_cast_rules WHERE 1::Int64 < i
+----
+1
+
+query I
+SELECT count(*) FROM auto_cast_rules WHERE i > 0::Int64 AND i < 3::Int64
+----
+2
+
+query I
+SELECT count(*) FROM auto_cast_rules WHERE if(i > 1::Int64, i < 3::Int64, false)
+----
+1
+
+query I
+SELECT count(*) FROM auto_cast_rules WHERE is_null(i > 1::Int64)
+----
+1
+
+# An out-of-range constant must not be narrowed to Int32.
+query I
+SELECT count(*) FROM auto_cast_rules WHERE i < 9223372036854775807::Int64
+----
+2
+
+# Int64 -> Float64 is not injective: both integers compare equal in Float64.
+# Moving the cast to the constant would incorrectly select just one row.
+query I
+SELECT count(*) FROM auto_cast_rules WHERE big = 9007199254740992::Float64
+----
+2
+
+query I
+SELECT count(*) FROM auto_cast_rules WHERE CAST(i AS Int64) > 1::Int64
+----
+1
+
+statement ok
+DROP TABLE auto_cast_rules

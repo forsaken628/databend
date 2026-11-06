@@ -169,7 +169,10 @@ pub trait TypeCheck<Index: ColumnIndex> {
 impl<ColumnID: ColumnIndex> TypeCheck<ColumnID> for RawExpr<ColumnID> {
     fn type_check(&self, type_provider: &impl TypeProvider<ColumnID>) -> Result<Expr<ColumnID>> {
         let raw_expr = update_column_type(self, type_provider)?;
-        type_check::check(&raw_expr, &BUILTIN_FUNCTIONS)
+        type_check::check_with_options(&raw_expr, &BUILTIN_FUNCTIONS, type_check::CheckOptions {
+            prefer_exact_arguments: true,
+            ..Default::default()
+        })
     }
 }
 
@@ -308,7 +311,14 @@ impl ScalarExpr {
     }
 
     pub fn as_expr(&self) -> Result<Expr<ColumnBinding>> {
-        type_check::check(&self.as_raw_expr(), &BUILTIN_FUNCTIONS)
+        type_check::check_with_options(
+            &self.as_raw_expr(),
+            &BUILTIN_FUNCTIONS,
+            type_check::CheckOptions {
+                prefer_exact_arguments: true,
+                ..Default::default()
+            },
+        )
     }
 
     /// The value of an expression that must be a constant, such as a function

@@ -1825,7 +1825,9 @@ fn register_like(registry: &mut FunctionRegistry) {
             if !arg_type.is_string() && !arg_type.is_variant() {
                 return None;
             }
-            let mut new_args_type = match &args_type[1] {
+            // Materialized implicit casts may already have the nullable
+            // signature types when this factory is called again by lowering.
+            let mut new_args_type = match args_type[1].remove_nullable() {
                 DataType::Tuple(patterns_ty) => {
                     if patterns_ty
                         .iter()
@@ -1871,7 +1873,7 @@ fn register_like(registry: &mut FunctionRegistry) {
             if !arg_type.is_string() {
                 return None;
             }
-            let mut new_args_type = match &args_type[1] {
+            let mut new_args_type = match args_type[1].remove_nullable() {
                 DataType::Tuple(patterns_ty) => {
                     if patterns_ty.iter().any(|ty| !ty.is_string()) {
                         return None;

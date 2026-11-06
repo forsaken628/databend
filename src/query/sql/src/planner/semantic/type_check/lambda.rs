@@ -174,7 +174,11 @@ where A: super::TypeCheckAdapter
         )?;
         let resolved = type_checker.resolve_core(arena, lambda_expr)?;
         Self::reject_runtime_udf_in_lambda_body(func_name, span, &resolved.0)?;
-        Ok(resolved)
+        // The body is a complete scalar region here. It must be optimized
+        // before compilation into RemoteExpr makes its structure opaque to
+        // the enclosing expression's optimizer.
+        let (scalar, data_type) = *resolved;
+        crate::optimizer::scalar::optimize(scalar, data_type, &type_checker.func_ctx).map(Box::new)
     }
 
     /// A lambda body is compiled into a `RemoteExpr` and evaluated per element by

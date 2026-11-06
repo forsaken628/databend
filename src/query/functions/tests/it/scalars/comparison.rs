@@ -28,6 +28,92 @@ use goldenfile::Mint;
 use super::run_ast;
 
 #[test]
+fn test_like_any_rebinds_materialized_nullable_arguments() {
+    use std::collections::HashMap;
+
+    use databend_common_expression::Expr;
+    use databend_common_expression::FoldRules;
+    use databend_common_expression::Scalar;
+    use databend_common_expression::type_check::CheckOptions;
+    use databend_common_expression_test_support::parse_raw_expr;
+
+    for name in ["like_any", "ilike_any"] {
+        for pattern_type in [
+            DataType::String.wrap_nullable(),
+            DataType::Tuple(vec![DataType::String, DataType::String]).wrap_nullable(),
+        ] {
+            let raw = parse_raw_expr(
+                &format!("{name}(text, patterns)"),
+                &[
+                    ("text", DataType::String.wrap_nullable()),
+                    ("patterns", pattern_type),
+                ],
+                &BUILTIN_FUNCTIONS,
+            );
+            let checked = type_check::check(&raw, &BUILTIN_FUNCTIONS).unwrap();
+            let Expr::FunctionCall(call) = &checked else {
+                panic!("expected comparison function")
+            };
+            let rebound =
+                type_check::check_function(call.span, name, &[], &call.args, &BUILTIN_FUNCTIONS)
+                    .unwrap();
+            assert_eq!(checked.data_type(), &DataType::Boolean.wrap_nullable());
+            assert_eq!(rebound.data_type(), checked.data_type());
+            let Expr::FunctionCall(rebound) = rebound else {
+                panic!("expected comparison function")
+            };
+            assert_eq!(rebound.args, call.args);
+            let exact = type_check::check_with_options(&raw, &BUILTIN_FUNCTIONS, CheckOptions {
+                prefer_exact_arguments: true,
+                ..Default::default()
+            })
+            .unwrap();
+            let null_patterns = exact.fill_const_column(&HashMap::from([
+                (0, Scalar::String("abc".to_string())),
+                (1, Scalar::Null),
+            ]));
+            assert_eq!(
+                FoldRules::eval_constant(
+                    &FunctionContext::default(),
+                    &BUILTIN_FUNCTIONS,
+                    &null_patterns
+                ),
+                Some(Scalar::Null)
+            );
+        }
+    }
+}
+
+#[test]
+fn test_nullable_like_any_patterns() {
+    let mut mint = Mint::new("tests/it/scalars/testdata");
+    let file = &mut mint
+        .new_goldenfile("nullable_like_any_patterns.txt")
+        .unwrap();
+    let columns = [(
+        "text",
+        StringType::from_opt_data(vec![Some("abc"), Some("def"), None]),
+    )];
+    for name in ["like_any", "ilike_any"] {
+        run_ast(
+            file,
+            &format!("{name}(text, CAST('a%' AS String NULL))"),
+            &columns,
+        );
+        run_ast(
+            file,
+            &format!("{name}(text, CAST(('a%', 'd%') AS Tuple(String, String) NULL))"),
+            &columns,
+        );
+        run_ast(
+            file,
+            &format!("{name}(text, CAST(NULL AS Tuple(String, String) NULL))"),
+            &columns,
+        );
+    }
+}
+
+#[test]
 fn test_comparison() {
     let mut mint = Mint::new("tests/it/scalars/testdata");
     let file = &mut mint.new_goldenfile("comparison.txt").unwrap();

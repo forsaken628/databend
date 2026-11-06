@@ -9,21 +9,21 @@ type: UInt8 NULL
 description: Non-literal array indices should bind through get with normal type checking.
 sql: array('a', 'b', 'c')[delta % 2]
 status: ok
-scalar: get(['a', 'b', 'c'], modulo(delta (#3), 2))
+scalar: get(['a', 'b', 'c'], CAST(modulo(delta (#3), 2) AS UInt64 NULL))
 type: String NULL
 
 === array_dynamic_index_before_literal_path_binds ===
 description: Literal access after a dynamic index should preserve the remaining path.
 sql: [[10, 20], [30, 40]][delta][2]
 status: ok
-scalar: get(get([[10, 20], [30, 40]], delta (#3)), 2)
+scalar: get(CAST(get([[10, 20], [30, 40]], CAST(delta (#3) AS UInt64 NULL)) AS Array(UInt8 NULL) NULL), 2)
 type: UInt8 NULL
 
 === array_dynamic_index_after_literal_path_binds ===
 description: A dynamic index should preserve preceding literal access.
 sql: [[10, 20], [30, 40]][1][delta]
 status: ok
-scalar: get([10, 20], delta (#3))
+scalar: get([10, 20], CAST(delta (#3) AS UInt64 NULL))
 type: UInt8 NULL
 
 === map_expression_key_access_binds ===

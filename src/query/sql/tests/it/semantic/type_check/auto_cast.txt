@@ -1,0 +1,184 @@
+=== lossless_integer_conversion ===
+sql: delta > 1::Int64
+bound: gt(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: gt(delta (#3), 1)
+lowered: delta (#3) > 1
+type: Boolean NULL
+
+=== nested_lossless_comparison ===
+sql: if(delta > 1::Int64, number, 0)
+bound: if(gt(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL)), number (#0), CAST(0 AS Int64 NULL))
+bound_type: Int64 NULL
+optimized: if(gt(delta (#3), 1), number (#0), 0)
+lowered: if(delta (#3) > 1, number (#0), 0)
+type: Int64 NULL
+
+=== multiple_lossless_sites ===
+sql: delta > 1::Int64 AND delta < 100::Int64
+bound: and(gt(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL)), lt(CAST(delta (#3) AS Int64 NULL), CAST(100 AS Int64 NULL)))
+bound_type: Boolean NULL
+optimized: and(gt(delta (#3), 1), lt(delta (#3), 100))
+lowered: (delta (#3) > 1 AND delta (#3) < 100)
+type: Boolean NULL
+
+=== out_of_range_constant ===
+sql: delta > 9223372036854775807::Int64
+bound: gt(CAST(delta (#3) AS Int64 NULL), CAST(9223372036854775807 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: gt(CAST(delta (#3) AS Int64 NULL), 9223372036854775807)
+lowered: CAST(delta (#3) AS Int64 NULL) > 9223372036854775807
+type: Boolean NULL
+
+=== lossy_integer_float_conversion ===
+sql: number > 9007199254740992::Float64
+bound: gt(CAST(number (#0) AS Float64 NULL), CAST(9007199254740992 AS Float64 NULL))
+bound_type: Boolean NULL
+optimized: gt(CAST(number (#0) AS Float64 NULL), 9007199254740992)
+lowered: CAST(number (#0) AS Float64 NULL) > 9007199254740992
+type: Boolean NULL
+
+=== explicit_numeric_conversion ===
+sql: CAST(delta AS Int64) > 1::Int64
+bound: gt(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: gt(CAST(delta (#3) AS Int64 NULL), 1)
+lowered: CAST(delta (#3) AS Int64 NULL) > 1
+type: Boolean NULL
+
+=== integer_constant_on_left ===
+sql: 1::Int64 < delta
+bound: lt(CAST(1 AS Int64 NULL), CAST(delta (#3) AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: lt(1, delta (#3))
+lowered: 1 < delta (#3)
+type: Boolean NULL
+
+=== unsigned_integer_equality ===
+sql: wide = 1::Int64
+bound: eq(wide (#7), CAST(1 AS UInt64 NULL))
+bound_type: Boolean NULL
+optimized: eq(wide (#7), 1)
+lowered: wide (#7) = CAST(1 AS UInt64 NULL)
+type: Boolean NULL
+
+=== string_column_integer_literal ===
+sql: text > 1
+bound: gt(text (#1), CAST(1 AS UInt8 NULL))
+bound_type: Boolean NULL
+optimized: gt(text (#1), 1)
+lowered: text (#1) > 1
+type: Boolean NULL
+
+=== nested_comparison ===
+sql: if(text > 1, number, 0)
+bound: if(gt(text (#1), CAST(1 AS UInt8 NULL)), number (#0), CAST(0 AS Int64 NULL))
+bound_type: Int64 NULL
+optimized: if(gt(text (#1), 1), number (#0), 0)
+lowered: if(text (#1) > 1, number (#0), 0)
+type: Int64 NULL
+
+=== multiple_rewrite_sites ===
+sql: text > 1 AND pattern < 2
+bound: and(gt(text (#1), CAST(1 AS UInt8 NULL)), lt(pattern (#2), CAST(2 AS UInt8 NULL)))
+bound_type: Boolean NULL
+optimized: and(gt(text (#1), 1), lt(pattern (#2), 2))
+lowered: (text (#1) > 1 AND pattern (#2) < 2)
+type: Boolean NULL
+
+=== explicit_cast_boundary ===
+sql: CAST(text > 1 AS STRING)
+bound: CAST(gt(text (#1), CAST(1 AS UInt8 NULL)) AS String NULL)
+bound_type: String NULL
+optimized: CAST(gt(text (#1), 1) AS String NULL)
+lowered: CAST(text (#1) > 1 AS String NULL)
+type: String NULL
+
+=== explicit_column_cast ===
+sql: CAST(text AS DECIMAL(38, 0)) > 1
+bound: gt(CAST(text (#1) AS Decimal(38, 0) NULL), CAST(1 AS Decimal(3, 0) NULL))
+bound_type: Boolean NULL
+optimized: gt(CAST(text (#1) AS Decimal(38, 0) NULL), 1)
+lowered: CAST(text (#1) AS Decimal(38, 0) NULL) > 1
+type: Boolean NULL
+
+=== typed_decimal_literal ===
+sql: text > 1::DECIMAL(38, 0)
+bound: gt(text (#1), CAST(1 AS Float64 NULL))
+bound_type: Boolean NULL
+optimized: gt(text (#1), 1)
+lowered: text (#1) > 1
+type: Boolean NULL
+
+=== two_runtime_inputs ===
+sql: text > number
+bound: gt(text (#1), number (#0))
+bound_type: Boolean NULL
+optimized: gt(text (#1), number (#0))
+lowered: text (#1) > number (#0)
+type: Boolean NULL
+
+=== no_compatible_column_type ===
+sql: if(flag, text, 1)
+bound: if(flag (#4), CAST(text (#1) AS Decimal(38, 5) NULL), CAST(1 AS Decimal(38, 5) NULL))
+bound_type: Decimal(38, 5) NULL
+optimized: if(flag (#4), CAST(text (#1) AS Decimal(38, 5) NULL), 1.00000)
+lowered: if(flag (#4), CAST(text (#1) AS Decimal(38, 5) NULL), 1.00000)
+type: Decimal(38, 5) NULL
+
+=== nullable_predicate ===
+sql: is_null(text > 1)
+bound: not(is_not_null(gt(text (#1), CAST(1 AS UInt8 NULL))))
+bound_type: Boolean
+optimized: not(is_not_null(gt(text (#1), 1)))
+lowered: NOT is_not_null(text (#1) > 1)
+type: Boolean
+
+=== implicit_timestamp_constant ===
+sql: ts > '2024-01-01'
+bound: gt(ts (#5), CAST('2024-01-01' AS Timestamp NULL))
+bound_type: Boolean NULL
+optimized: gt(ts (#5), '2024-01-01 00:00:00.000000')
+lowered: ts (#5) > '2024-01-01 00:00:00.000000'
+type: Boolean NULL
+
+=== failed_constant_cast ===
+sql: number > 'not a number'
+bound: gt(number (#0), CAST('not a number' AS String NULL))
+bound_type: Boolean NULL
+optimized: gt(number (#0), 'not a number')
+lowered: number (#0) > 'not a number'
+type: Boolean NULL
+
+=== non_deterministic_conversion ===
+sql: rand() > try_to_float64(0)
+bound: gt(CAST(rand() AS Float64 NULL), 0)
+bound_type: Boolean NULL
+optimized: gt(CAST(rand() AS Float64 NULL), 0)
+lowered: CAST(rand() AS Float64 NULL) > 0
+type: Boolean NULL
+
+=== fractional_literal_not_narrowed ===
+sql: delta > 1.5
+bound: gt(CAST(delta (#3) AS Decimal(10, 0) NULL), CAST(1.5 AS Decimal(2, 1) NULL))
+bound_type: Boolean NULL
+optimized: gt(CAST(delta (#3) AS Decimal(10, 0) NULL), 1.5)
+lowered: CAST(delta (#3) AS Decimal(10, 0) NULL) > 1.5
+type: Boolean NULL
+
+=== lambda_body_region ===
+sql: array_transform([1::Int32, 2::Int32], x -> x > 1::Int64)
+bound: array_transform([1, 2], ["x"] -> x (#8) > 1)
+bound_type: Array(Boolean)
+optimized: array_transform([1, 2], ["x"] -> x (#8) > 1)
+lowered: array_transform([1, 2], ["x"] -> x (#8) > 1)
+type: Array(Boolean)
+
+=== lambda_out_of_range ===
+sql: array_transform([1::Int32, 2::Int32], x -> x > 9223372036854775807::Int64)
+bound: array_transform([1, 2], ["x"] -> false)
+bound_type: Array(Boolean)
+optimized: array_transform([1, 2], ["x"] -> false)
+lowered: array_transform([1, 2], ["x"] -> false)
+type: Array(Boolean)
+

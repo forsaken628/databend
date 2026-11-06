@@ -79,14 +79,14 @@ type: Boolean NULL
 description: A nullable constant cast implicitly is replaced by a constant of the checked nullable type, as a literal would make the call non-nullable.
 sql: assume_not_null(ts) > try_to_string('2001-01-01')
 status: ok
-scalar: gt(assume_not_null(ts (#5)), '2001-01-01 00:00:00.000000')
+scalar: gt(CAST(assume_not_null(ts (#5)) AS Timestamp NULL), '2001-01-01 00:00:00.000000')
 type: Boolean NULL
 
 === explicit_try_cast_keeps_parent_nullable ===
 description: A folded explicit cast is not an implicitly cast argument, so the parent keeps it and its nullability.
 sql: try_to_uint8('1') + small
 status: ok
-scalar: plus(1, small (#7))
+scalar: plus(1, CAST(small (#7) AS UInt8 NULL))
 type: UInt16 NULL
 
 === type_range_decides_comparison ===
@@ -205,7 +205,7 @@ type: String
 description: COALESCE of a non-nullable first argument yields it.
 sql: coalesce(nn, number)
 status: ok
-scalar: CAST(assume_not_null(nn (#8)) AS Int64 NULL)
+scalar: CAST(assume_not_null(CAST(nn (#8) AS Int64 NULL)) AS Int64 NULL)
 type: Int64 NULL
 
 === boolean_absorption ===
@@ -240,7 +240,7 @@ type: Boolean
 description: A UDF may fail or have effects, so IS NOT NULL keeps it.
 sql: is_not_null(script_udf(text))
 status: ok
-scalar: is_not_null(handler(CAST(text (#1) AS String)))
+scalar: is_not_null(CAST(handler(CAST(text (#1) AS String)) AS String NULL))
 type: Boolean
 
 === udf_is_not_dropped_by_multiplication ===
@@ -268,5 +268,5 @@ type: Boolean
 description: grouping is kept for the aggregate rewriter, even when its result is known not to be NULL.
 sql: is_not_null(grouping(number))
 status: ok
-scalar: is_not_null(grouping(number (#0)))
+scalar: is_not_null(CAST(grouping(number (#0)) AS UInt32 NULL))
 type: Boolean

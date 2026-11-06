@@ -1,0 +1,110 @@
+ast            : like_any(text, CAST('a%' AS String NULL))
+raw expr       : like_any(text::String NULL, CAST('a%' AS String NULL))
+checked expr   : like_any<String NULL, String NULL>(text, CAST<String>("a%" AS String NULL))
+optimized expr : like_any<String NULL, String NULL>(text, "a%")
+evaluation:
++--------+--------------------------+------------------------+
+|        | text                     | Output                 |
++--------+--------------------------+------------------------+
+| Type   | String NULL              | Boolean NULL           |
+| Domain | {"abc"..="def"} ∪ {NULL} | {FALSE, TRUE} ∪ {NULL} |
+| Row 0  | 'abc'                    | true                   |
+| Row 1  | 'def'                    | false                  |
+| Row 2  | NULL                     | NULL                   |
++--------+--------------------------+------------------------+
+evaluation (internal):
++--------+-------------------------------------------------------------------------------------+
+| Column | Data                                                                                |
++--------+-------------------------------------------------------------------------------------+
+| text   | Column(NullableColumn { column: StringColumn[abc, def, ], validity: [0b_____011] }) |
+| Output | NullableColumn { column: Boolean([0b_____001]), validity: [0b_____011] }            |
++--------+-------------------------------------------------------------------------------------+
+
+
+ast            : like_any(text, CAST(('a%', 'd%') AS Tuple(String, String) NULL))
+raw expr       : like_any(text::String NULL, CAST(tuple('a%', 'd%') AS Tuple(String, String) NULL))
+checked expr   : like_any<String NULL, Tuple(String, String) NULL>(text, CAST<Tuple(String, String)>(tuple<String, String>("a%", "d%") AS Tuple(String, String) NULL))
+optimized expr : like_any<String NULL, Tuple(String, String) NULL>(text, ("a%", "d%"))
+evaluation:
++--------+--------------------------+------------------------+
+|        | text                     | Output                 |
++--------+--------------------------+------------------------+
+| Type   | String NULL              | Boolean NULL           |
+| Domain | {"abc"..="def"} ∪ {NULL} | {FALSE, TRUE} ∪ {NULL} |
+| Row 0  | 'abc'                    | true                   |
+| Row 1  | 'def'                    | true                   |
+| Row 2  | NULL                     | NULL                   |
++--------+--------------------------+------------------------+
+evaluation (internal):
++--------+-------------------------------------------------------------------------------------+
+| Column | Data                                                                                |
++--------+-------------------------------------------------------------------------------------+
+| text   | Column(NullableColumn { column: StringColumn[abc, def, ], validity: [0b_____011] }) |
+| Output | NullableColumn { column: Boolean([0b_____011]), validity: [0b_____011] }            |
++--------+-------------------------------------------------------------------------------------+
+
+
+ast            : like_any(text, CAST(NULL AS Tuple(String, String) NULL))
+raw expr       : like_any(text::String NULL, CAST(NULL AS Tuple(String, String) NULL))
+checked expr   : like_any<String NULL, Tuple(String, String) NULL>(text, CAST<NULL>(NULL AS Tuple(String, String) NULL))
+optimized expr : NULL
+output type    : Boolean NULL
+output domain  : {NULL}
+output         : NULL
+
+
+ast            : ilike_any(text, CAST('a%' AS String NULL))
+raw expr       : ilike_any(text::String NULL, CAST('a%' AS String NULL))
+checked expr   : ilike_any<String NULL, String NULL>(text, CAST<String>("a%" AS String NULL))
+optimized expr : ilike_any<String NULL, String NULL>(text, "a%")
+evaluation:
++--------+--------------------------+------------------------+
+|        | text                     | Output                 |
++--------+--------------------------+------------------------+
+| Type   | String NULL              | Boolean NULL           |
+| Domain | {"abc"..="def"} ∪ {NULL} | {FALSE, TRUE} ∪ {NULL} |
+| Row 0  | 'abc'                    | true                   |
+| Row 1  | 'def'                    | false                  |
+| Row 2  | NULL                     | NULL                   |
++--------+--------------------------+------------------------+
+evaluation (internal):
++--------+-------------------------------------------------------------------------------------+
+| Column | Data                                                                                |
++--------+-------------------------------------------------------------------------------------+
+| text   | Column(NullableColumn { column: StringColumn[abc, def, ], validity: [0b_____011] }) |
+| Output | NullableColumn { column: Boolean([0b_____001]), validity: [0b_____011] }            |
++--------+-------------------------------------------------------------------------------------+
+
+
+ast            : ilike_any(text, CAST(('a%', 'd%') AS Tuple(String, String) NULL))
+raw expr       : ilike_any(text::String NULL, CAST(tuple('a%', 'd%') AS Tuple(String, String) NULL))
+checked expr   : ilike_any<String NULL, Tuple(String, String) NULL>(text, CAST<Tuple(String, String)>(tuple<String, String>("a%", "d%") AS Tuple(String, String) NULL))
+optimized expr : ilike_any<String NULL, Tuple(String, String) NULL>(text, ("a%", "d%"))
+evaluation:
++--------+--------------------------+------------------------+
+|        | text                     | Output                 |
++--------+--------------------------+------------------------+
+| Type   | String NULL              | Boolean NULL           |
+| Domain | {"abc"..="def"} ∪ {NULL} | {FALSE, TRUE} ∪ {NULL} |
+| Row 0  | 'abc'                    | true                   |
+| Row 1  | 'def'                    | true                   |
+| Row 2  | NULL                     | NULL                   |
++--------+--------------------------+------------------------+
+evaluation (internal):
++--------+-------------------------------------------------------------------------------------+
+| Column | Data                                                                                |
++--------+-------------------------------------------------------------------------------------+
+| text   | Column(NullableColumn { column: StringColumn[abc, def, ], validity: [0b_____011] }) |
+| Output | NullableColumn { column: Boolean([0b_____011]), validity: [0b_____011] }            |
++--------+-------------------------------------------------------------------------------------+
+
+
+ast            : ilike_any(text, CAST(NULL AS Tuple(String, String) NULL))
+raw expr       : ilike_any(text::String NULL, CAST(NULL AS Tuple(String, String) NULL))
+checked expr   : ilike_any<String NULL, Tuple(String, String) NULL>(text, CAST<NULL>(NULL AS Tuple(String, String) NULL))
+optimized expr : NULL
+output type    : Boolean NULL
+output domain  : {NULL}
+output         : NULL
+
+

@@ -116,7 +116,8 @@ impl<'a, A: TypeCheckAdapter> ScalarBinder<'a, A> {
             type_checker.set_masking_where_aliases(aliases);
         }
         type_checker.set_forbid_virtual_computed_column(self.forbid_virtual_computed_column);
-        Ok(*type_checker.resolve(expr)?)
+        let (scalar, data_type) = *type_checker.resolve(expr)?;
+        crate::optimizer::scalar::optimize(scalar, data_type, type_checker.function_context())
     }
 
     pub fn get_func_ctx(&self) -> Result<FunctionContext> {

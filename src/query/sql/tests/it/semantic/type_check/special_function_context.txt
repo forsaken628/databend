@@ -177,12 +177,12 @@ type: Array(UInt8)
 description: Pure special-function rewrites stay allowed.
 sql: coalesce(text, pattern)
 status: ok
-scalar: if(is_not_null(text (#1)), assume_not_null(text (#1)), is_not_null(pattern (#2)), assume_not_null(pattern (#2)), NULL)
+scalar: if(CAST(is_not_null(text (#1)) AS Boolean NULL), CAST(assume_not_null(text (#1)) AS String NULL), CAST(is_not_null(pattern (#2)) AS Boolean NULL), CAST(assume_not_null(pattern (#2)) AS String NULL), CAST(NULL AS String NULL))
 type: String NULL
 
 === greatest_allowed ===
 description: Pure special-function rewrites stay allowed.
 sql: greatest(number, 1)
 status: ok
-scalar: if(array_contains(array(number (#0), 1), NULL), NULL, array_max(array(number (#0), 1)))
+scalar: if(CAST(array_contains(CAST(array(number (#0), CAST(1 AS Int64 NULL)) AS Array(Int64 NULL) NULL), CAST(NULL AS Int64 NULL)) AS Boolean NULL), CAST(NULL AS Int64 NULL), array_max(array(number (#0), CAST(1 AS Int64 NULL))))
 type: Int64 NULL

@@ -45,6 +45,7 @@ use super::TypeCheckAdapter;
 use super::TypeChecker;
 use crate::ColumnBinding;
 use crate::Symbol;
+use crate::plans::AutoCastExpr;
 use crate::plans::CastExpr;
 use crate::plans::ConstantExpr;
 use crate::plans::FunctionCall;
@@ -210,6 +211,10 @@ where A: TypeCheckAdapter
                     facts,
                     &cast.target_type,
                 )
+            }
+            ScalarExpr::AutoCast(cast) => {
+                let facts = self.derive_facts(&cast.argument);
+                self.cast_facts(cast.span, false, &cast.argument, facts, &cast.target_type)
             }
             ScalarExpr::FunctionCall(func) => {
                 let facts = func
@@ -568,25 +573,33 @@ where A: TypeCheckAdapter
         if func.arguments.len() != 2 {
             return None;
         }
-        let raw_arg = |arg: &ScalarExpr| match arg {
-            ScalarExpr::BoundColumnRef(column) => Some(RawExpr::ColumnRef {
-                span: column.span,
-                id: column.column.index,
-                data_type: (*column.column.data_type).clone(),
-                display_name: column.column.column_name.clone(),
-            }),
-            ScalarExpr::ConstantExpr(constant) => Some(RawExpr::Constant {
-                span: constant.span,
-                scalar: constant.value.clone(),
-                data_type: None,
-            }),
-            ScalarExpr::TypedConstantExpr(constant, data_type) => Some(RawExpr::Constant {
-                span: constant.span,
-                scalar: constant.value.clone(),
-                data_type: Some(data_type.clone()),
-            }),
-            _ => None,
-        };
+        fn raw_arg(arg: &ScalarExpr) -> Option<RawExpr<Symbol>> {
+            match arg {
+                ScalarExpr::BoundColumnRef(column) => Some(RawExpr::ColumnRef {
+                    span: column.span,
+                    id: column.column.index,
+                    data_type: (*column.column.data_type).clone(),
+                    display_name: column.column.column_name.clone(),
+                }),
+                ScalarExpr::ConstantExpr(constant) => Some(RawExpr::Constant {
+                    span: constant.span,
+                    scalar: constant.value.clone(),
+                    data_type: None,
+                }),
+                ScalarExpr::TypedConstantExpr(constant, data_type) => Some(RawExpr::Constant {
+                    span: constant.span,
+                    scalar: constant.value.clone(),
+                    data_type: Some(data_type.clone()),
+                }),
+                ScalarExpr::AutoCast(cast) => Some(RawExpr::Cast {
+                    span: cast.span,
+                    is_try: false,
+                    expr: Box::new(raw_arg(&cast.argument)?),
+                    dest_type: *cast.target_type.clone(),
+                }),
+                _ => None,
+            }
+        }
         let raw = RawExpr::FunctionCall {
             span: func.span,
             name: func.func_name.clone(),
@@ -653,7 +666,7 @@ where A: TypeCheckAdapter
         span: Span,
         func_name: &str,
         params: Vec<Scalar>,
-        call: expr::FunctionCall<usize>,
+        mut call: expr::FunctionCall<usize>,
         args: Vec<BoundScalar>,
     ) -> Result<BoundScalar> {
         let arg_facts =
@@ -791,57 +804,10 @@ where A: TypeCheckAdapter
             }
         }
 
-        // Arguments fold before the call is checked. An argument whose checked
-        // type differs from its own was cast implicitly by the check, e.g. the
-        // literal in `timestamp > '2001-01-01'`, and its value is known only
-        // now. It is replaced only if the constant keeps the checked type, so
-        // that the call binds as checked. A non-nullable argument becomes a
-        // literal; nullability that the check added is ignored, as lowering
-        // adds it again. A nullable argument keeps its nullability, as the
-        // call may be nullable only because of it, so it becomes a constant
-        // of the checked type. Other arguments, including folded explicit
-        // casts, are kept as bound.
-        let mut folded_args = call
-            .args
-            .iter()
-            .zip(
-                call.function
-                    .signature
-                    .args_type
-                    .iter()
-                    .map(DataType::is_generic),
-            )
-            .zip(args)
-            .zip(&arg_facts)
-            .map(
-                |(((checked_arg, is_generic), arg), facts)| match &facts.constant {
-                    Some(value)
-                        if arg.facts.evaluable
-                            && !is_generic
-                            && checked_arg.data_type() != &arg.data_type =>
-                    {
-                        let (folded, checked_type) = if arg.data_type.is_nullable_or_null() {
-                            let data_type = checked_arg.data_type().clone();
-                            let folded = Self::folded_constant_of_type(
-                                checked_arg.span(),
-                                value.clone(),
-                                data_type.clone(),
-                            );
-                            (folded, data_type)
-                        } else {
-                            let folded = Self::folded_constant(checked_arg.span(), value.clone());
-                            (folded, checked_arg.data_type().remove_nullable())
-                        };
-                        if folded.data_type == checked_type {
-                            folded
-                        } else {
-                            arg
-                        }
-                    }
-                    _ => arg,
-                },
-            )
-            .collect::<Vec<_>>();
+        // Preserve source types until the complete scalar has been bound.
+        // Folding an implicit cast now would erase alternatives, e.g. turn the
+        // integer in `text > 1` into a Decimal before expression optimization.
+        let mut folded_args = args;
 
         // reorder
         if func_name == "eq"
@@ -850,6 +816,7 @@ where A: TypeCheckAdapter
             && !matches!(folded_args[1].scalar, ScalarExpr::ConstantExpr(_))
         {
             folded_args.swap(0, 1);
+            call.args.swap(0, 1);
         }
 
         let facts = if is_grouping {
@@ -868,7 +835,26 @@ where A: TypeCheckAdapter
             scalar: FunctionCall {
                 span,
                 params,
-                arguments: folded_args.into_iter().map(|arg| arg.scalar).collect(),
+                arguments: folded_args
+                    .into_iter()
+                    .zip(call.args)
+                    .map(|(arg, checked)| match checked {
+                        EExpr::Cast(cast) if arg.data_type != cast.dest_type => {
+                            if cast.is_try {
+                                CastExpr {
+                                    span: cast.span,
+                                    is_try: true,
+                                    argument: Box::new(arg.scalar),
+                                    target_type: Box::new(cast.dest_type),
+                                }
+                                .into()
+                            } else {
+                                ScalarExpr::AutoCast(AutoCastExpr::new(arg.scalar, cast.dest_type))
+                            }
+                        }
+                        _ => arg.scalar,
+                    })
+                    .collect(),
                 func_name: func_name.to_string(),
                 return_type: Box::new(return_type.clone()),
             }

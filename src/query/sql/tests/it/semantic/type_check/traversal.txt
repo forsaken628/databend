@@ -23,7 +23,7 @@ type: Tuple(Int64 NULL, Int64 NULL, Array(Int64 NULL))
 description: Special-function traversal still performs its original scalar rewrite.
 sql: coalesce(NULL, number + 1)
 status: ok
-scalar: if(is_not_null(plus(number (#0), 1)), assume_not_null(plus(number (#0), 1)), NULL)
+scalar: if(CAST(is_not_null(plus(number (#0), 1)) AS Boolean NULL), CAST(assume_not_null(plus(number (#0), 1)) AS Int64 NULL), NULL)
 type: Int64 NULL
 
 === window_partition_order_and_range_contexts ===
