@@ -59,27 +59,11 @@ pub struct CheckOptions {
     pub prefer_exact_arguments: bool,
 }
 
-/// The inferred types of one source node, in source-tree postorder.
-/// Another representation can materialize implicit conversions from these
-/// annotations without resolving its nodes a second time.
-#[derive(Debug)]
-pub struct CheckedNode {
-    pub data_type: DataType,
-    pub arguments: Option<Vec<CheckedArgument>>,
-}
-
-#[derive(Debug)]
-pub struct CheckedArgument {
-    pub data_type: DataType,
-    pub is_try: bool,
-    pub constant: Option<Scalar>,
-}
-
 pub fn check<Index: ColumnIndex>(
     expr: &RawExpr<Index>,
     fn_registry: &FunctionRegistry,
 ) -> Result<Expr<Index>> {
-    check_impl(expr, fn_registry, CheckOptions::default(), &mut None)
+    check_impl(expr, fn_registry, CheckOptions::default())
 }
 
 pub fn check_with_options<Index: ColumnIndex>(
@@ -87,20 +71,7 @@ pub fn check_with_options<Index: ColumnIndex>(
     fn_registry: &FunctionRegistry,
     options: CheckOptions,
 ) -> Result<Expr<Index>> {
-    check_impl(expr, fn_registry, options, &mut None)
-}
-
-/// Check the complete expression under inference constraints, also returning
-/// source-node types. Annotations are produced during inference, not by a
-/// subsequent traversal that resolves overloads again.
-pub fn check_with_types<Index: ColumnIndex>(
-    expr: &RawExpr<Index>,
-    fn_registry: &FunctionRegistry,
-    options: CheckOptions,
-) -> Result<(Expr<Index>, Vec<CheckedNode>)> {
-    let mut nodes = Some(Vec::new());
-    let checked = check_impl(expr, fn_registry, options, &mut nodes)?;
-    Ok((checked, nodes.unwrap()))
+    check_impl(expr, fn_registry, options)
 }
 
 #[recursive::recursive]
@@ -108,9 +79,8 @@ fn check_impl<Index: ColumnIndex>(
     expr: &RawExpr<Index>,
     fn_registry: &FunctionRegistry,
     options: CheckOptions,
-    nodes: &mut Option<Vec<CheckedNode>>,
 ) -> Result<Expr<Index>> {
-    let checked: Expr<Index> = match expr {
+    match expr {
         RawExpr::Constant {
             span,
             scalar,
@@ -142,7 +112,7 @@ fn check_impl<Index: ColumnIndex>(
             expr,
             dest_type,
         } => {
-            let expr = check_impl(expr, fn_registry, options, nodes)?;
+            let expr = check_impl(expr, fn_registry, options)?;
             check_cast(*span, *is_try, expr, dest_type, fn_registry)
         }
         RawExpr::FunctionCall {
@@ -153,7 +123,7 @@ fn check_impl<Index: ColumnIndex>(
         } => {
             let mut args_expr: Vec<_> = args
                 .iter()
-                .map(|arg| check_impl(arg, fn_registry, options, nodes))
+                .map(|arg| check_impl(arg, fn_registry, options))
                 .try_collect()?;
 
             // https://github.com/datafuselabs/databend/issues/11541
@@ -205,7 +175,7 @@ fn check_impl<Index: ColumnIndex>(
         } => {
             let args: Vec<_> = args
                 .iter()
-                .map(|arg| check_impl(arg, fn_registry, options, nodes))
+                .map(|arg| check_impl(arg, fn_registry, options))
                 .try_collect()?;
 
             Ok(LambdaFunctionCall {
@@ -218,36 +188,7 @@ fn check_impl<Index: ColumnIndex>(
             }
             .into())
         }
-    }?;
-    if let Some(nodes) = nodes {
-        let arguments = match (expr, &checked) {
-            (RawExpr::FunctionCall { name, .. }, Expr::FunctionCall(call)) => {
-                let mut name = name.as_str();
-                while let Some(original) = fn_registry.aliases.get(name) {
-                    name = original;
-                }
-                (name == call.function.signature.name).then(|| {
-                    call.args
-                        .iter()
-                        .map(|arg| CheckedArgument {
-                            data_type: arg.data_type().clone(),
-                            is_try: matches!(arg, Expr::Cast(cast) if cast.is_try),
-                            constant: match arg {
-                                Expr::Constant(constant) => Some(constant.scalar.clone()),
-                                _ => None,
-                            },
-                        })
-                        .collect()
-                })
-            }
-            _ => None,
-        };
-        nodes.push(CheckedNode {
-            data_type: checked.data_type().clone(),
-            arguments,
-        });
     }
-    Ok(checked)
 }
 
 pub fn check_cast<Index: ColumnIndex>(

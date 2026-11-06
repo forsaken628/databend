@@ -12,159 +12,121 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use databend_common_expression::Constant;
+use databend_common_expression::Expr;
 use databend_common_expression::FoldRules;
 use databend_common_expression::FunctionContext;
+use databend_common_expression::RawExpr;
 use databend_common_expression::conversion::classify_conversion;
+use databend_common_expression::type_check;
 use databend_common_expression::type_check::CheckOptions;
 use databend_common_expression::types::DataType;
 use databend_common_functions::BUILTIN_FUNCTIONS;
 
-use super::ScalarRewrite;
-use super::ScalarRule;
-use super::children;
-use super::children_mut;
-use super::contains_column_ref;
-use crate::plans::AutoCastExpr;
+use crate::plans::FunctionCall;
 use crate::plans::ScalarExpr;
 
-/// Move a lossless numeric comparison conversion from a runtime input to a
-/// literal, if that literal keeps its value in the original comparison domain.
-/// The rule proposes syntax, not an overload or a locally committed type.
-pub(super) struct MoveAutoCastToConstants;
-
-struct RewriteSite {
-    path: Vec<usize>,
-    column: usize,
-    column_type: DataType,
-}
-
-impl ScalarRule for MoveAutoCastToConstants {
-    fn candidates<'a>(
-        &'a self,
-        expression: &'a ScalarExpr,
-        func_ctx: &'a FunctionContext,
-    ) -> Box<dyn Iterator<Item = ScalarRewrite> + 'a> {
-        let mut sites = Vec::new();
-        find_rewrites(expression, func_ctx, &mut Vec::new(), &mut sites);
-        Box::new(sites.into_iter().map(|site| {
-            let mut candidate = expression.clone();
-            let mut node = &mut candidate;
-            for index in site.path {
-                node = &mut children_mut(node)[index];
-            }
-            let ScalarExpr::FunctionCall(call) = node else {
-                unreachable!("rewrite paths name function calls")
-            };
-            call.arguments = std::mem::take(&mut call.arguments)
-                .into_iter()
-                .enumerate()
-                .map(|(index, arg)| {
-                    if index == site.column {
-                        let ScalarExpr::AutoCast(cast) = arg else {
-                            unreachable!("rewrite sites name inferred conversions")
-                        };
-                        *cast.argument
-                    } else {
-                        ScalarExpr::AutoCast(AutoCastExpr::new(
-                            strip_auto_casts(arg),
-                            site.column_type.clone(),
-                        ))
-                    }
-                })
-                .collect();
-            ScalarRewrite {
-                expression: candidate,
-                options: CheckOptions {
-                    forbid_column_casts: true,
-                    prefer_exact_arguments: true,
-                },
-            }
-        }))
-    }
-}
-
-#[recursive::recursive]
-fn find_rewrites(
-    scalar: &ScalarExpr,
-    func_ctx: &FunctionContext,
-    path: &mut Vec<usize>,
-    sites: &mut Vec<RewriteSite>,
-) {
-    if let ScalarExpr::FunctionCall(call) = scalar
-        && matches!(
-            call.func_name.as_str(),
-            "eq" | "noteq" | "gt" | "gte" | "lt" | "lte"
-        )
-        && call.arguments.len() == 2
+/// Match `cmp(AutoCast<U>(e:T), k:U)` (or the reversed arguments) after
+/// literal AutoCasts have folded. Change it to `cmp(e:T, k':T)` only when
+/// widening T to U is lossless and k' round-trips to k in U.
+pub(super) fn move_cast_to_constant(call: &mut FunctionCall, func_ctx: &FunctionContext) {
+    if !matches!(
+        call.func_name.as_str(),
+        "eq" | "noteq" | "gt" | "gte" | "lt" | "lte"
+    ) || call.arguments.len() != 2
     {
-        for column in 0..2 {
-            let ScalarExpr::AutoCast(cast) = &call.arguments[column] else {
-                continue;
-            };
-            let column_type = cast.argument.data_type();
-            if !contains_column_ref(&cast.argument)
-                || !matches!(
-                    column_type.remove_nullable(),
-                    DataType::Number(_) | DataType::Decimal(_)
-                )
-                || !matches!(
-                    cast.target_type.remove_nullable(),
-                    DataType::Number(_) | DataType::Decimal(_)
-                )
-                || !classify_conversion(&column_type, &cast.target_type).is_lossless_injective()
-            {
-                continue;
-            }
-            let other = &call.arguments[1 - column];
-            if other.data_type().as_ref() != cast.target_type.as_ref() {
-                continue;
-            }
-            let literal = auto_cast_argument(other);
-            if !matches!(
-                literal,
-                ScalarExpr::ConstantExpr(_) | ScalarExpr::TypedConstantExpr(_, _)
-            ) {
-                continue;
-            }
-            let converted = ScalarExpr::AutoCast(AutoCastExpr::new(
-                literal.clone(),
-                column_type.clone().into_owned(),
-            ));
-            let round_trip =
-                ScalarExpr::AutoCast(AutoCastExpr::new(converted, *cast.target_type.clone()));
-            let same_value = other.as_expr().ok().and_then(|original| {
-                let original = FoldRules::eval_constant(func_ctx, &BUILTIN_FUNCTIONS, &original)?;
-                let round_trip = round_trip.as_expr().ok()?;
-                let converted =
-                    FoldRules::eval_constant(func_ctx, &BUILTIN_FUNCTIONS, &round_trip)?;
-                Some(original == converted)
-            });
-            if same_value == Some(true) {
-                sites.push(RewriteSite {
-                    path: path.clone(),
-                    column,
-                    column_type: column_type.into_owned(),
-                });
-            }
+        return;
+    }
+    for runtime in 0..2 {
+        let ScalarExpr::AutoCast(cast) = &call.arguments[runtime] else {
+            continue;
+        };
+        let source_type = cast.argument.data_type();
+        if !matches!(
+            source_type.remove_nullable(),
+            DataType::Number(_) | DataType::Decimal(_)
+        ) || !matches!(
+            cast.target_type.remove_nullable(),
+            DataType::Number(_) | DataType::Decimal(_)
+        ) || !classify_conversion(&source_type, &cast.target_type).is_lossless_injective()
+        {
+            continue;
         }
-    }
-    for (index, child) in children(scalar).iter().enumerate() {
-        path.push(index);
-        find_rewrites(child, func_ctx, path, sites);
-        path.pop();
-    }
-}
+        let other = &call.arguments[1 - runtime];
+        let (ScalarExpr::ConstantExpr(literal) | ScalarExpr::TypedConstantExpr(literal, _)) = other
+        else {
+            continue;
+        };
+        if other.data_type().as_ref() != cast.target_type.as_ref() {
+            continue;
+        }
+        let original: Expr<usize> = Constant {
+            span: other.span(),
+            scalar: literal.value.clone(),
+            data_type: *cast.target_type.clone(),
+        }
+        .into();
+        let Some(converted) = type_check::check_cast(
+            other.span(),
+            false,
+            original,
+            &source_type,
+            &BUILTIN_FUNCTIONS,
+        )
+        .ok()
+        .and_then(|expr| FoldRules::eval_constant(func_ctx, &BUILTIN_FUNCTIONS, &expr)) else {
+            continue;
+        };
+        let narrowed: Expr<usize> = Constant {
+            span: other.span(),
+            scalar: converted.clone(),
+            data_type: source_type.clone().into_owned(),
+        }
+        .into();
+        let round_trip = type_check::check_cast(
+            other.span(),
+            false,
+            narrowed,
+            &cast.target_type,
+            &BUILTIN_FUNCTIONS,
+        )
+        .ok()
+        .and_then(|expr| FoldRules::eval_constant(func_ctx, &BUILTIN_FUNCTIONS, &expr));
+        if round_trip.as_ref() != Some(&literal.value) {
+            continue;
+        }
 
-fn auto_cast_argument(mut scalar: &ScalarExpr) -> &ScalarExpr {
-    while let ScalarExpr::AutoCast(cast) = scalar {
-        scalar = &cast.argument;
+        // Only this comparison changes. Check its proposed argument types,
+        // not the bound runtime subtree, and reject any new runtime coercion
+        // or result nullability change before mutating the call.
+        let raw: RawExpr<usize> = RawExpr::FunctionCall {
+            span: call.span,
+            name: call.func_name.clone(),
+            params: call.params.clone(),
+            args: (0..2)
+                .map(|id| RawExpr::ColumnRef {
+                    span: None,
+                    id,
+                    data_type: source_type.clone().into_owned(),
+                    display_name: id.to_string(),
+                })
+                .collect(),
+        };
+        let Ok(checked) = type_check::check_with_options(&raw, &BUILTIN_FUNCTIONS, CheckOptions {
+            forbid_column_casts: true,
+            prefer_exact_arguments: true,
+        }) else {
+            continue;
+        };
+        if checked.data_type() != call.return_type.as_ref() {
+            continue;
+        }
+        let replacement = super::constant(other.span(), converted, source_type.into_owned());
+        let ScalarExpr::AutoCast(cast) = call.arguments.remove(runtime) else {
+            unreachable!()
+        };
+        call.arguments.insert(runtime, *cast.argument);
+        call.arguments[1 - runtime] = replacement;
+        return;
     }
-    scalar
-}
-
-fn strip_auto_casts(mut scalar: ScalarExpr) -> ScalarExpr {
-    while let ScalarExpr::AutoCast(cast) = scalar {
-        scalar = *cast.argument;
-    }
-    scalar
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use databend_common_exception::Result;
+use databend_common_expression::Expr;
 use databend_common_expression::Function;
 use databend_common_expression::FunctionDomain;
 use databend_common_expression::FunctionEval;
@@ -44,7 +45,7 @@ fn register_predicate(registry: &mut FunctionRegistry, name: &str, argument: Dat
 }
 
 #[test]
-fn inference_options_and_annotations_cover_nested_source_nodes() -> Result<()> {
+fn inference_options_cover_nested_calls() -> Result<()> {
     let int32 = DataType::Number(NumberDataType::Int32);
     let int64 = DataType::Number(NumberDataType::Int64);
     let mut registry = FunctionRegistry::empty();
@@ -83,24 +84,29 @@ fn inference_options_and_annotations_cover_nested_source_nodes() -> Result<()> {
             args: vec![predicate.clone(), predicate],
         }),
     };
-    let (default, nodes) = type_check::check_with_types(&raw, &registry, CheckOptions::default())?;
-    assert_eq!(default, type_check::check(&raw, &registry)?);
-    assert_eq!(nodes.len(), 8);
-    assert_eq!(nodes[0].data_type, int32);
-    assert_eq!(nodes[2].arguments.as_ref().unwrap()[0].data_type, int64);
-    assert_eq!(nodes[5].arguments.as_ref().unwrap()[0].data_type, int64);
-    assert_eq!(nodes[7].data_type, DataType::String);
-
-    let (constrained, nodes) = type_check::check_with_types(&raw, &registry, CheckOptions {
+    let assert_argument_types = |checked: &Expr<usize>, expected: &DataType| {
+        let Expr::Cast(root) = checked else {
+            unreachable!()
+        };
+        let Expr::FunctionCall(conjunction) = root.expr.as_ref() else {
+            unreachable!()
+        };
+        for predicate in &conjunction.args {
+            let Expr::FunctionCall(call) = predicate else {
+                unreachable!()
+            };
+            assert_eq!(call.args[0].data_type(), expected);
+            assert_eq!(call.args[1].data_type(), expected);
+        }
+    };
+    let default = type_check::check(&raw, &registry)?;
+    assert_argument_types(&default, &int64);
+    let constrained = type_check::check_with_options(&raw, &registry, CheckOptions {
         forbid_column_casts: true,
         ..Default::default()
     })?;
     assert_ne!(default, constrained);
-    for node in [2, 5] {
-        let arguments = nodes[node].arguments.as_ref().unwrap();
-        assert_eq!(arguments[0].data_type, int32);
-        assert_eq!(arguments[1].constant, Some(Scalar::from(1_i32)));
-    }
+    assert_argument_types(&constrained, &int32);
     let exact = type_check::check_with_options(&raw, &registry, CheckOptions {
         prefer_exact_arguments: true,
         ..Default::default()

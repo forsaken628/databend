@@ -97,17 +97,17 @@ fn test_nullable_like_any_patterns() {
     for name in ["like_any", "ilike_any"] {
         run_ast(
             file,
-            &format!("{name}(text, CAST('a%' AS String NULL))"),
+            format!("{name}(text, CAST('a%' AS String NULL))"),
             &columns,
         );
         run_ast(
             file,
-            &format!("{name}(text, CAST(('a%', 'd%') AS Tuple(String, String) NULL))"),
+            format!("{name}(text, CAST(('a%', 'd%') AS Tuple(String, String) NULL))"),
             &columns,
         );
         run_ast(
             file,
-            &format!("{name}(text, CAST(NULL AS Tuple(String, String) NULL))"),
+            format!("{name}(text, CAST(NULL AS Tuple(String, String) NULL))"),
             &columns,
         );
     }

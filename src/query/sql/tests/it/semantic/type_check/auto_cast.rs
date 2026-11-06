@@ -46,6 +46,19 @@ async fn test_auto_cast_expression_rules() -> Result<()> {
             "CAST(delta AS Int64) > 1::Int64",
         ),
         ("integer_constant_on_left", "1::Int64 < delta"),
+        ("less_or_equal", "delta <= 1::Int64"),
+        ("greater_or_equal", "delta >= 1::Int64"),
+        ("not_equal", "delta <> 1::Int64"),
+        (
+            "nonnullable_runtime_expression",
+            "assume_not_null(delta) > 1::Int64",
+        ),
+        ("same_type_columns_need_no_widening", "delta > delta"),
+        ("mixed_runtime_types_are_not_rewritten", "delta > number"),
+        (
+            "if_result_type_is_not_changed",
+            "if(flag, delta, 1::Int64) > 2::Int64",
+        ),
         ("unsigned_integer_equality", "wide = 1::Int64"),
         ("string_column_integer_literal", "text > 1"),
         ("nested_comparison", "if(text > 1, number, 0)"),
@@ -190,6 +203,13 @@ async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
         "CAST(delta AS Int64) > 1::Int64",
         "number = 9007199254740992::Float64",
         "wide = 1::Int64",
+        "delta <= 1::Int64",
+        "delta >= 1::Int64",
+        "delta <> 1::Int64",
+        "assume_not_null(delta) > 1::Int64",
+        "delta > delta",
+        "delta > number",
+        "if(flag, delta, 1::Int64) > 2::Int64",
     ] {
         let settings = Settings::create(Tenant::new_literal("default"));
         let adapter = TestTypeCheckAdapter::new(settings);
@@ -229,6 +249,7 @@ async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
             Some(i32::MAX),
         ] {
             let values = HashMap::from([
+                (Symbol::new(4), Scalar::Boolean(delta.is_some())),
                 (
                     Symbol::new(0),
                     Scalar::Number(NumberScalar::Int64(9007199254740993)),

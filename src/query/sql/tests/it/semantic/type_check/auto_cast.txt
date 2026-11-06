@@ -54,6 +54,62 @@ optimized: lt(1, delta (#3))
 lowered: 1 < delta (#3)
 type: Boolean NULL
 
+=== less_or_equal ===
+sql: delta <= 1::Int64
+bound: lte(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: lte(delta (#3), 1)
+lowered: delta (#3) <= 1
+type: Boolean NULL
+
+=== greater_or_equal ===
+sql: delta >= 1::Int64
+bound: gte(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: gte(delta (#3), 1)
+lowered: delta (#3) >= 1
+type: Boolean NULL
+
+=== not_equal ===
+sql: delta <> 1::Int64
+bound: noteq(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: noteq(delta (#3), 1)
+lowered: delta (#3) <> 1
+type: Boolean NULL
+
+=== nonnullable_runtime_expression ===
+sql: assume_not_null(delta) > 1::Int64
+bound: gt(CAST(assume_not_null(delta (#3)) AS Int64), 1)
+bound_type: Boolean
+optimized: gt(assume_not_null(delta (#3)), 1)
+lowered: assume_not_null(delta (#3)) > 1
+type: Boolean
+
+=== same_type_columns_need_no_widening ===
+sql: delta > delta
+bound: gt(delta (#3), delta (#3))
+bound_type: Boolean NULL
+optimized: gt(delta (#3), delta (#3))
+lowered: delta (#3) > delta (#3)
+type: Boolean NULL
+
+=== mixed_runtime_types_are_not_rewritten ===
+sql: delta > number
+bound: gt(CAST(delta (#3) AS Int64 NULL), number (#0))
+bound_type: Boolean NULL
+optimized: gt(CAST(delta (#3) AS Int64 NULL), number (#0))
+lowered: CAST(delta (#3) AS Int64 NULL) > number (#0)
+type: Boolean NULL
+
+=== if_result_type_is_not_changed ===
+sql: if(flag, delta, 1::Int64) > 2::Int64
+bound: gt(if(flag (#4), CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL)), CAST(2 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: gt(if(flag (#4), CAST(delta (#3) AS Int64 NULL), 1), 2)
+lowered: if(flag (#4), CAST(delta (#3) AS Int64 NULL), 1) > 2
+type: Boolean NULL
+
 === unsigned_integer_equality ===
 sql: wide = 1::Int64
 bound: eq(wide (#7), CAST(1 AS UInt64 NULL))
