@@ -515,6 +515,7 @@ mod auto_cast;
 mod column;
 mod core_expr;
 mod date;
+mod expr_display;
 mod in_list;
 mod lambda;
 mod literal;

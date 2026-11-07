@@ -15,6 +15,7 @@
 use databend_common_ast::ast::FormatTreeNode;
 use itertools::Itertools;
 
+use super::display::ExprDisplay;
 use super::display::IdHumanizer;
 use super::display::OperatorHumanizer;
 use crate::planner::format::display::DefaultOperatorHumanizer;
@@ -120,96 +121,7 @@ impl OperatorHumanizer<PhysicalRelOperator> for DefaultOperatorHumanizer {
 }
 
 fn format_scalar<I: IdHumanizer>(id_humanizer: &I, scalar: &ScalarExpr) -> String {
-    match scalar {
-        ScalarExpr::BoundColumnRef(column_ref) => {
-            id_humanizer.humanize_column_id(column_ref.column.index)
-        }
-        ScalarExpr::ConstantExpr(constant) => constant.value.to_string(),
-        ScalarExpr::TypedConstantExpr(constant, _) => constant.value.to_string(),
-        ScalarExpr::WindowFunction(win) => win.display_name.clone(),
-        ScalarExpr::AggregateFunction(agg) => {
-            format!(
-                "{}{}({})",
-                agg.func_name,
-                if agg.params.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        "({})",
-                        agg.params
-                            .iter()
-                            .map(|param| param.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                },
-                agg.args
-                    .iter()
-                    .map(|arg| format_scalar(id_humanizer, arg))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        }
-        ScalarExpr::LambdaFunction(lambda) => {
-            let args = lambda
-                .args
-                .iter()
-                .map(|arg| format_scalar(id_humanizer, arg))
-                .collect::<Vec<String>>()
-                .join(", ");
-            format!("{}({}, {})", lambda.func_name, args, lambda.lambda_display,)
-        }
-        ScalarExpr::FunctionCall(func) => {
-            let params = func.params.iter().map(|param| param.to_string()).join(", ");
-            let arguments = func
-                .arguments
-                .iter()
-                .map(|arg| format_scalar(id_humanizer, arg))
-                .join(", ");
-            if params.is_empty() {
-                format!("{}({})", func.func_name, arguments)
-            } else {
-                format!("{}({})({})", func.func_name, params, arguments)
-            }
-        }
-        ScalarExpr::CastExpr(cast) => {
-            format!(
-                "CAST({} AS {})",
-                format_scalar(id_humanizer, &cast.argument),
-                cast.target_type
-            )
-        }
-        ScalarExpr::AutoCast(cast) => {
-            format!(
-                "CAST({} AS {})",
-                format_scalar(id_humanizer, &cast.argument),
-                cast.target_type
-            )
-        }
-        ScalarExpr::SubqueryExpr(sub) => {
-            format!("SUBQUERY AS (#{})", sub.output_column.index)
-        }
-        ScalarExpr::UDFCall(udf) => {
-            format!(
-                "{}({})",
-                udf.handler,
-                udf.arguments
-                    .iter()
-                    .map(|arg| format_scalar(id_humanizer, arg))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            )
-        }
-        ScalarExpr::UDFLambdaCall(udf) => {
-            format!(
-                "{}({})",
-                udf.func_name,
-                format_scalar(id_humanizer, &udf.scalar)
-            )
-        }
-        ScalarExpr::UDAFCall(udaf) => udaf.display_name.clone(),
-        ScalarExpr::AsyncFunctionCall(async_func) => async_func.display_name.clone(),
-    }
+    ExprDisplay::with_id_humanizer(id_humanizer).format_scalar(scalar)
 }
 
 fn format_scalar_item<I: IdHumanizer>(id_humanizer: &I, item: &ScalarItem) -> String {

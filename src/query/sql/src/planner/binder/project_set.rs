@@ -26,13 +26,14 @@ use databend_common_functions::BUILTIN_FUNCTIONS;
 use crate::BindContext;
 use crate::Binder;
 use crate::ColumnBinding;
+use crate::ExprDisplay;
+use crate::FormatOptions;
 use crate::MetadataRef;
 use crate::ScalarExpr;
 use crate::Visibility;
 use crate::binder::ColumnBindingBuilder;
 use crate::binder::aggregate::AggregateRewriter;
 use crate::binder::select::SelectList;
-use crate::format_scalar;
 use crate::optimizer::ir::SExpr;
 use crate::plans::BoundColumnRef;
 use crate::plans::FunctionCall;
@@ -40,6 +41,16 @@ use crate::plans::ProjectSet;
 use crate::plans::ScalarItem;
 use crate::plans::VisitorMut;
 use crate::plans::walk_expr_mut;
+
+// These strings are lookup keys as well as labels; implicit conversions must
+// remain visible here even though ordinary display hides them.
+fn format_srf_key(scalar: &ScalarExpr) -> String {
+    ExprDisplay::new(&FormatOptions {
+        show_auto_cast: true,
+        ..Default::default()
+    })
+    .format_scalar(scalar)
+}
 
 #[derive(Default, Clone, PartialEq, Eq, Debug)]
 pub struct SetReturningInfo {
@@ -153,7 +164,7 @@ impl<'a> VisitorMut<'a> for SetReturningAnalyzer<'a> {
                 }
                 .into();
 
-                let srf_display_name = format_scalar(&replaced_expr);
+                let srf_display_name = format_srf_key(&replaced_expr);
 
                 let srf_info = &mut self.bind_context.srf_info;
                 if let Some(column_binding) =
@@ -273,7 +284,7 @@ impl Binder {
         let mut srf_info = mem::take(&mut bind_context.srf_info);
         let mut rewriter = SetReturningRewriter::new(bind_context);
         for srf_item in srf_info.srfs.iter_mut() {
-            let srf_display_name = format_scalar(&srf_item.scalar);
+            let srf_display_name = format_srf_key(&srf_item.scalar);
             rewriter.is_lazy_srf = false;
             rewriter.visit(&mut srf_item.scalar)?;
 

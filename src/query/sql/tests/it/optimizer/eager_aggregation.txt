@@ -103,7 +103,7 @@ Sort
         ├── group items: [lineitem.l_orderkey (#17) AS (#17), orders.o_orderdate (#4) AS (#4), orders.o_shippriority (#7) AS (#7)]
         ├── aggregate functions: [sum(sum(l_extendedprice * (1 - l_discount)) * _eager_count (#42)) AS (#34)]
         └── EvalScalar
-            ├── scalars: [CAST(multiply(multiply(lineitem.l_extendedprice (#22), minus(1, lineitem.l_discount (#23))), CAST(count(*) (#41) AS UInt64)) AS Decimal(38, 4) NULL) AS (#42)]
+            ├── scalars: [CAST(multiply(multiply(lineitem.l_extendedprice (#22), minus(1, lineitem.l_discount (#23))), count(*) (#41)) AS Decimal(38, 4) NULL) AS (#42)]
             └── Join(Inner)
                 ├── build keys: [lineitem.l_orderkey (#17)]
                 ├── probe keys: [orders.o_orderkey (#0)]
@@ -141,7 +141,7 @@ Sort
         ├── group items: [lineitem.l_orderkey (#17) AS (#17), orders.o_orderdate (#4) AS (#4), orders.o_shippriority (#7) AS (#7)]
         ├── aggregate functions: [sum(sum(l_extendedprice * (1 - l_discount)) * _eager_count (#45)) AS (#43)]
         └── EvalScalar
-            ├── scalars: [CAST(multiply(sum(l_extendedprice * (1 - l_discount)) (#34), CAST(count(*) (#44) AS UInt64)) AS Decimal(38, 4) NULL) AS (#45)]
+            ├── scalars: [CAST(multiply(sum(l_extendedprice * (1 - l_discount)) (#34), count(*) (#44)) AS Decimal(38, 4) NULL) AS (#45)]
             └── Join(Inner)
                 ├── build keys: [lineitem.l_orderkey (#17)]
                 ├── probe keys: [orders.o_orderkey (#0)]
@@ -238,7 +238,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(sum(l_extendedprice * (1 - l_discount)) * _eager_count (#31)) AS (#26)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(multiply(lineitem.l_extendedprice (#5), minus(1, lineitem.l_discount (#6))), CAST(count(*) (#30) AS UInt64)) AS Decimal(38, 4) NULL) AS (#31)]
+        ├── scalars: [CAST(multiply(multiply(lineitem.l_extendedprice (#5), minus(1, lineitem.l_discount (#6))), count(*) (#30)) AS Decimal(38, 4) NULL) AS (#31)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -264,7 +264,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(sum(l_extendedprice * (1 - l_discount)) * _eager_count (#34)) AS (#32)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(sum(l_extendedprice * (1 - l_discount)) (#26), CAST(count(*) (#33) AS UInt64)) AS Decimal(38, 4) NULL) AS (#34)]
+        ├── scalars: [CAST(multiply(sum(l_extendedprice * (1 - l_discount)) (#26), count(*) (#33)) AS Decimal(38, 4) NULL) AS (#34)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -325,7 +325,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(sum(l_extendedprice) (#25)) AS (#28), sum(sum(o_totalprice) * _eager_count (#30)) AS (#26)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(orders.o_totalprice (#19), CAST(count(*) (#29) AS UInt64)) AS Decimal(18, 2) NULL) AS (#30)]
+        ├── scalars: [CAST(multiply(orders.o_totalprice (#19), count(*) (#29)) AS Decimal(18, 2) NULL) AS (#30)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -353,7 +353,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#35)) AS (#31), sum(sum(o_totalprice) * _eager_count (#36)) AS (#32)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), CAST(count(*) (#34) AS UInt64)) AS Decimal(18, 2) NULL) AS (#35), CAST(multiply(sum(o_totalprice) (#26), CAST(count(*) (#33) AS UInt64)) AS Decimal(18, 2) NULL) AS (#36)]
+        ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), count(*) (#34)) AS Decimal(18, 2) NULL) AS (#35), CAST(multiply(sum(o_totalprice) (#26), count(*) (#33)) AS Decimal(18, 2) NULL) AS (#36)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -458,7 +458,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#18) AS (#18)]
     ├── aggregate functions: [sum(sum(revenue) * _eager_count (#33)) AS (#27)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(sum(l_extendedprice * (1 - l_discount)) (#17), CAST(count(*) (#32) AS UInt64)) AS Decimal(38, 4) NULL) AS (#33)]
+        ├── scalars: [CAST(multiply(sum(l_extendedprice * (1 - l_discount)) (#17), count(*) (#32)) AS Decimal(38, 4) NULL) AS (#33)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#18)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -491,7 +491,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#18) AS (#18)]
     ├── aggregate functions: [sum(sum(revenue) * _eager_count (#36)) AS (#34)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(sum(revenue) (#27), CAST(count(*) (#35) AS UInt64)) AS Decimal(38, 4) NULL) AS (#36)]
+        ├── scalars: [CAST(multiply(sum(revenue) (#27), count(*) (#35)) AS Decimal(38, 4) NULL) AS (#36)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#18)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -585,7 +585,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(COUNT(*) * _eager_count (#30)) AS (#28)]
     └── EvalScalar
-        ├── scalars: [multiply(COUNT(*) (#25), CAST(count(*) (#29) AS UInt64)) AS (#30)]
+        ├── scalars: [multiply(COUNT(*) (#25), count(*) (#29)) AS (#30)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -665,7 +665,7 @@ EvalScalar
 
 apply_plan_0:
 EvalScalar
-├── scalars: [CAST(if(is_not_null(_eager_final_count (#9)), _eager_final_count (#9), 0) AS UInt64) AS (#3), CAST(if(is_not_null(_eager_final_count (#8)), _eager_final_count (#8), 0) AS UInt64) AS (#4), plus(CAST(if(is_not_null(_eager_final_count (#8)), _eager_final_count (#8), 0) AS UInt64), 1) AS (#5)]
+├── scalars: [CAST(if(is_not_null(_eager_final_count (#9)), _eager_final_count (#9), 0) AS UInt64) AS (#3), CAST(if(is_not_null(_eager_final_count (#8)), _eager_final_count (#8), 0) AS UInt64) AS (#4), plus(if(is_not_null(_eager_final_count (#8)), _eager_final_count (#8), 0), 1) AS (#5)]
 └── Aggregate(Initial)
     ├── group items: []
     ├── aggregate functions: [sum(COUNT(*) (#3)) AS (#9), sum(count(l.v) (#4)) AS (#8)]
@@ -691,12 +691,12 @@ EvalScalar
 
 apply_plan_1:
 EvalScalar
-├── scalars: [CAST(if(is_not_null(_eager_final_count (#11)), _eager_final_count (#11), 0) AS UInt64) AS (#3), CAST(if(is_not_null(_eager_final_count (#10)), _eager_final_count (#10), 0) AS UInt64) AS (#4), plus(CAST(if(is_not_null(_eager_final_count (#10)), _eager_final_count (#10), 0) AS UInt64), 1) AS (#5)]
+├── scalars: [CAST(if(is_not_null(_eager_final_count (#11)), _eager_final_count (#11), 0) AS UInt64) AS (#3), CAST(if(is_not_null(_eager_final_count (#10)), _eager_final_count (#10), 0) AS UInt64) AS (#4), plus(if(is_not_null(_eager_final_count (#10)), _eager_final_count (#10), 0), 1) AS (#5)]
 └── Aggregate(Initial)
     ├── group items: []
     ├── aggregate functions: [sum(COUNT(*) * _eager_count (#13)) AS (#11), sum(count(l.v) * _eager_count (#14)) AS (#10)]
     └── EvalScalar
-        ├── scalars: [multiply(COUNT(*) (#3), CAST(count(*) (#12) AS UInt64)) AS (#13), multiply(count(l.v) (#4), CAST(count(*) (#12) AS UInt64)) AS (#14)]
+        ├── scalars: [multiply(COUNT(*) (#3), count(*) (#12)) AS (#13), multiply(count(l.v) (#4), count(*) (#12)) AS (#14)]
         └── Join(Inner)
             ├── build keys: [eager_count_r.k (#2)]
             ├── probe keys: [eager_count_l.k (#0)]
@@ -755,7 +755,7 @@ EvalScalar
     ├── group items: []
     ├── aggregate functions: [min(min(l.v) (#4)) AS (#8), sum(count(r.v) * _eager_count (#12)) AS (#9)]
     └── EvalScalar
-        ├── scalars: [multiply(count(r.v) (#5), CAST(count(*) (#10) AS UInt64)) AS (#12)]
+        ├── scalars: [multiply(count(r.v) (#5), count(*) (#10)) AS (#12)]
         └── Join(Inner)
             ├── build keys: [eager_count_r.k (#2)]
             ├── probe keys: [eager_count_l.k (#0)]
@@ -842,7 +842,7 @@ EvalScalar
     ├── group items: []
     ├── aggregate functions: [sum(count(l.v) * _eager_count (#14)) AS (#10), min(min(r.v) (#5)) AS (#11)]
     └── EvalScalar
-        ├── scalars: [multiply(count(l.v) (#4), CAST(count(*) (#13) AS UInt64)) AS (#14)]
+        ├── scalars: [multiply(count(l.v) (#4), count(*) (#13)) AS (#14)]
         └── Join(Inner)
             ├── build keys: [eager_count_r.k (#2)]
             ├── probe keys: [eager_count_l.k (#0)]
@@ -903,7 +903,7 @@ EvalScalar
     ├── group items: []
     ├── aggregate functions: [sum(count(l.v) * _eager_count (#12)) AS (#8), sum(count(r.v) * _eager_count (#13)) AS (#9)]
     └── EvalScalar
-        ├── scalars: [multiply(count(l.v) (#4), CAST(count(*) (#11) AS UInt64)) AS (#12), multiply(count(r.v) (#5), CAST(count(*) (#10) AS UInt64)) AS (#13)]
+        ├── scalars: [multiply(count(l.v) (#4), count(*) (#11)) AS (#12), multiply(count(r.v) (#5), count(*) (#10)) AS (#13)]
         └── Join(Inner)
             ├── build keys: [eager_count_r.k (#2)]
             ├── probe keys: [eager_count_l.k (#0)]
@@ -990,7 +990,7 @@ EvalScalar
     ├── group items: []
     ├── aggregate functions: [min(min(l.v) (#4)) AS (#12), max(max(r.v) (#5)) AS (#14), sum(COUNT(*) * _eager_count (#17)) AS (#13)]
     └── EvalScalar
-        ├── scalars: [multiply(COUNT(*) (#6), CAST(count(*) (#16) AS UInt64)) AS (#17)]
+        ├── scalars: [multiply(COUNT(*) (#6), count(*) (#16)) AS (#17)]
         └── Join(Inner)
             ├── build keys: [eager_count_r.k (#2)]
             ├── probe keys: [eager_count_l.k (#0)]
@@ -1023,7 +1023,7 @@ EvalScalar
     ├── group items: []
     ├── aggregate functions: [min(min(l.v) (#4)) AS (#18), max(max(r.v) (#5)) AS (#19), sum(COUNT(*) * _eager_count (#23)) AS (#20)]
     └── EvalScalar
-        ├── scalars: [multiply(COUNT(*) (#6), CAST(count(*) (#21) AS UInt64)) AS (#23)]
+        ├── scalars: [multiply(COUNT(*) (#6), count(*) (#21)) AS (#23)]
         └── Join(Inner)
             ├── build keys: [eager_count_r.k (#2)]
             ├── probe keys: [eager_count_l.k (#0)]
@@ -1140,7 +1140,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#30)) AS (#25)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(lineitem.l_extendedprice (#5), CAST(count(*) (#29) AS UInt64)) AS Decimal(18, 2) NULL) AS (#30)]
+        ├── scalars: [CAST(multiply(lineitem.l_extendedprice (#5), count(*) (#29)) AS Decimal(18, 2) NULL) AS (#30)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -1166,7 +1166,7 @@ EvalScalar
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#33)) AS (#31)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), CAST(count(*) (#32) AS UInt64)) AS Decimal(18, 2) NULL) AS (#33)]
+        ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), count(*) (#32)) AS Decimal(18, 2) NULL) AS (#33)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -1222,7 +1222,7 @@ EvalScalar
 
 apply_plan_0:
 EvalScalar
-├── scalars: [orders.o_orderkey (#16) AS (#16), plus(CAST(if(is_not_null(_eager_final_count (#28)), _eager_final_count (#28), 0) AS UInt64), 1) AS (#26)]
+├── scalars: [orders.o_orderkey (#16) AS (#16), plus(if(is_not_null(_eager_final_count (#28)), _eager_final_count (#28), 0), 1) AS (#26)]
 └── Aggregate(Initial)
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(COUNT(*) (#25)) AS (#28)]
@@ -1248,12 +1248,12 @@ EvalScalar
 
 apply_plan_1:
 EvalScalar
-├── scalars: [orders.o_orderkey (#16) AS (#16), plus(CAST(if(is_not_null(_eager_final_count (#29)), _eager_final_count (#29), 0) AS UInt64), 1) AS (#26)]
+├── scalars: [orders.o_orderkey (#16) AS (#16), plus(if(is_not_null(_eager_final_count (#29)), _eager_final_count (#29), 0), 1) AS (#26)]
 └── Aggregate(Initial)
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(COUNT(*) * _eager_count (#31)) AS (#29)]
     └── EvalScalar
-        ├── scalars: [multiply(COUNT(*) (#25), CAST(count(*) (#30) AS UInt64)) AS (#31)]
+        ├── scalars: [multiply(COUNT(*) (#25), count(*) (#30)) AS (#31)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -1279,7 +1279,7 @@ EvalScalar
 
 apply_plan_2:
 EvalScalar
-├── scalars: [orders.o_orderkey (#16) AS (#16), plus(CAST(if(is_not_null(_eager_final_count (#32)), _eager_final_count (#32), 0) AS UInt64), 1) AS (#26)]
+├── scalars: [orders.o_orderkey (#16) AS (#16), plus(if(is_not_null(_eager_final_count (#32)), _eager_final_count (#32), 0), 1) AS (#26)]
 └── Aggregate(Initial)
     ├── group items: [orders.o_orderkey (#16) AS (#16)]
     ├── aggregate functions: [sum(COUNT(*) (#25)) AS (#32)]
@@ -1366,7 +1366,7 @@ EvalScalar
     ├── group items: [orders.o_custkey (#17) AS (#17)]
     ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#30)) AS (#25)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(lineitem.l_extendedprice (#5), CAST(count(*) (#29) AS UInt64)) AS Decimal(18, 2) NULL) AS (#30)]
+        ├── scalars: [CAST(multiply(lineitem.l_extendedprice (#5), count(*) (#29)) AS Decimal(18, 2) NULL) AS (#30)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -1392,7 +1392,7 @@ EvalScalar
     ├── group items: [orders.o_custkey (#17) AS (#17)]
     ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#33)) AS (#31)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), CAST(count(*) (#32) AS UInt64)) AS Decimal(18, 2) NULL) AS (#33)]
+        ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), count(*) (#32)) AS Decimal(18, 2) NULL) AS (#33)]
         └── Join(Inner)
             ├── build keys: [orders.o_orderkey (#16)]
             ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -1479,7 +1479,7 @@ EvalScalar
     ├── group items: [orders.o_custkey (#1) AS (#1)]
     ├── aggregate functions: [sum(sum(o_totalprice) * _eager_count (#30)) AS (#25)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(orders.o_totalprice (#3), CAST(count(*) (#29) AS UInt64)) AS Decimal(18, 2) NULL) AS (#30)]
+        ├── scalars: [CAST(multiply(orders.o_totalprice (#3), count(*) (#29)) AS Decimal(18, 2) NULL) AS (#30)]
         └── Join(Inner)
             ├── build keys: [lineitem.l_orderkey (#9)]
             ├── probe keys: [orders.o_orderkey (#0)]
@@ -1505,7 +1505,7 @@ EvalScalar
     ├── group items: [orders.o_custkey (#1) AS (#1)]
     ├── aggregate functions: [sum(sum(o_totalprice) * _eager_count (#33)) AS (#31)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(sum(o_totalprice) (#25), CAST(count(*) (#32) AS UInt64)) AS Decimal(18, 2) NULL) AS (#33)]
+        ├── scalars: [CAST(multiply(sum(o_totalprice) (#25), count(*) (#32)) AS Decimal(18, 2) NULL) AS (#33)]
         └── Join(Inner)
             ├── build keys: [lineitem.l_orderkey (#9)]
             ├── probe keys: [orders.o_orderkey (#0)]
@@ -1592,7 +1592,7 @@ EvalScalar
     ├── group items: [orders.o_shippriority (#7) AS (#7)]
     ├── aggregate functions: [sum(sum(o_totalprice) * _eager_count (#32)) AS (#25)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(orders.o_totalprice (#3), CAST(count(*) (#31) AS UInt64)) AS Decimal(18, 2) NULL) AS (#32)]
+        ├── scalars: [CAST(multiply(orders.o_totalprice (#3), count(*) (#31)) AS Decimal(18, 2) NULL) AS (#32)]
         └── Join(Inner)
             ├── build keys: [lineitem.l_orderkey (#9), lineitem.l_partkey (#10)]
             ├── probe keys: [orders.o_orderkey (#0), orders.o_custkey (#1)]
@@ -1618,7 +1618,7 @@ EvalScalar
     ├── group items: [orders.o_shippriority (#7) AS (#7)]
     ├── aggregate functions: [sum(sum(o_totalprice) * _eager_count (#35)) AS (#33)]
     └── EvalScalar
-        ├── scalars: [CAST(multiply(sum(o_totalprice) (#25), CAST(count(*) (#34) AS UInt64)) AS Decimal(18, 2) NULL) AS (#35)]
+        ├── scalars: [CAST(multiply(sum(o_totalprice) (#25), count(*) (#34)) AS Decimal(18, 2) NULL) AS (#35)]
         └── Join(Inner)
             ├── build keys: [lineitem.l_orderkey (#9), lineitem.l_partkey (#10)]
             ├── probe keys: [orders.o_orderkey (#0), orders.o_custkey (#1)]
@@ -1899,7 +1899,7 @@ TopN
         ├── group items: [lineitem.l_orderkey (#0) AS (#0)]
         ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#29)) AS (#25)]
         └── EvalScalar
-            ├── scalars: [CAST(multiply(lineitem.l_extendedprice (#5), CAST(count(*) (#28) AS UInt64)) AS Decimal(18, 2) NULL) AS (#29)]
+            ├── scalars: [CAST(multiply(lineitem.l_extendedprice (#5), count(*) (#28)) AS Decimal(18, 2) NULL) AS (#29)]
             └── Join(Inner)
                 ├── build keys: [orders.o_orderkey (#16)]
                 ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -1930,7 +1930,7 @@ TopN
         ├── group items: [lineitem.l_orderkey (#0) AS (#0)]
         ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#32)) AS (#30)]
         └── EvalScalar
-            ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), CAST(count(*) (#31) AS UInt64)) AS Decimal(18, 2) NULL) AS (#32)]
+            ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), count(*) (#31)) AS Decimal(18, 2) NULL) AS (#32)]
             └── Join(Inner)
                 ├── build keys: [orders.o_orderkey (#16)]
                 ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -2034,7 +2034,7 @@ TopN
         ├── group items: [lineitem.l_orderkey (#0) AS (#0), lineitem.l_quantity (#4) AS (#4)]
         ├── aggregate functions: [sum(sum(l_quantity) * _eager_count (#30)) AS (#25)]
         └── EvalScalar
-            ├── scalars: [CAST(multiply(lineitem.l_quantity (#4), CAST(count(*) (#29) AS UInt64)) AS Decimal(18, 2) NULL) AS (#30)]
+            ├── scalars: [CAST(multiply(lineitem.l_quantity (#4), count(*) (#29)) AS Decimal(18, 2) NULL) AS (#30)]
             └── Join(Inner)
                 ├── build keys: [orders.o_orderkey (#16)]
                 ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -2065,7 +2065,7 @@ TopN
         ├── group items: [lineitem.l_orderkey (#0) AS (#0), lineitem.l_quantity (#4) AS (#4)]
         ├── aggregate functions: [sum(sum(l_quantity) * _eager_count (#33)) AS (#31)]
         └── EvalScalar
-            ├── scalars: [CAST(multiply(sum(l_quantity) (#25), CAST(count(*) (#32) AS UInt64)) AS Decimal(18, 2) NULL) AS (#33)]
+            ├── scalars: [CAST(multiply(sum(l_quantity) (#25), count(*) (#32)) AS Decimal(18, 2) NULL) AS (#33)]
             └── Join(Inner)
                 ├── build keys: [orders.o_orderkey (#16)]
                 ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -2164,7 +2164,7 @@ TopN
         ├── group items: [orders.o_orderkey (#16) AS (#16)]
         ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#30)) AS (#25)]
         └── EvalScalar
-            ├── scalars: [CAST(multiply(lineitem.l_extendedprice (#5), CAST(count(*) (#29) AS UInt64)) AS Decimal(18, 2) NULL) AS (#30)]
+            ├── scalars: [CAST(multiply(lineitem.l_extendedprice (#5), count(*) (#29)) AS Decimal(18, 2) NULL) AS (#30)]
             └── Join(Inner)
                 ├── build keys: [orders.o_orderkey (#16)]
                 ├── probe keys: [lineitem.l_orderkey (#0)]
@@ -2194,7 +2194,7 @@ TopN
         ├── group items: [orders.o_orderkey (#16) AS (#16)]
         ├── aggregate functions: [sum(sum(l_extendedprice) * _eager_count (#33)) AS (#31)]
         └── EvalScalar
-            ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), CAST(count(*) (#32) AS UInt64)) AS Decimal(18, 2) NULL) AS (#33)]
+            ├── scalars: [CAST(multiply(sum(l_extendedprice) (#25), count(*) (#32)) AS Decimal(18, 2) NULL) AS (#33)]
             └── Join(Inner)
                 ├── build keys: [orders.o_orderkey (#16)]
                 ├── probe keys: [lineitem.l_orderkey (#0)]

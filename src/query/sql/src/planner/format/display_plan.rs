@@ -33,7 +33,7 @@ impl SExpr {
     }
 
     pub fn pretty_format(&self, metadata: &crate::Metadata, stats: &StatContext) -> Result<String> {
-        let ids = MetadataIdHumanizer::new(metadata, FormatOptions { verbose: false }, stats);
+        let ids = MetadataIdHumanizer::new(metadata, FormatOptions::default(), stats);
         Ok(self.to_format_tree(&ids)?.format_pretty()?)
     }
 }
@@ -44,7 +44,7 @@ impl PExpr {
     }
 
     pub fn pretty_format(&self, metadata: &crate::Metadata, stats: &StatContext) -> Result<String> {
-        let ids = MetadataIdHumanizer::new(metadata, FormatOptions { verbose: false }, stats);
+        let ids = MetadataIdHumanizer::new(metadata, FormatOptions::default(), stats);
         Ok(self.to_format_tree(&ids)?.format_pretty()?)
     }
 }

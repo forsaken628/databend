@@ -33,7 +33,7 @@ EvalScalar
     └── EvalScalar
         ├── scalars: [plus(COUNT(*) (#4), 1) AS (#5)]
         └── EvalScalar
-            ├── scalars: [CAST(if(is_not_null(COUNT(*) (#7)), COUNT(*) (#7), CAST(0 AS UInt64 NULL)) AS UInt64) AS (#4)]
+            ├── scalars: [CAST(if(is_not_null(COUNT(*) (#7)), COUNT(*) (#7), 0) AS UInt64) AS (#4)]
             └── Join(Right)
                 ├── build keys: [sa_outer.k (#1)]
                 ├── probe keys: [sa_inner.k (#2)]
@@ -91,11 +91,11 @@ optimized_plan:
 EvalScalar
 ├── scalars: [sa_outer.id (#0) AS (#0), COUNT(*) (#8) AS (#5)]
 └── EvalScalar
-    ├── scalars: [if(subquery_matched (#7), COUNT(*) (#4), CAST(NULL AS UInt64 NULL)) AS (#8)]
+    ├── scalars: [if(subquery_matched (#7), COUNT(*) (#4), NULL) AS (#8)]
     └── EvalScalar
         ├── scalars: [COUNT(*) (#4) AS (#4), is_true(eq(COUNT(*) (#4), 0)) AS (#7)]
         └── EvalScalar
-            ├── scalars: [CAST(if(is_not_null(COUNT(*) (#6)), COUNT(*) (#6), CAST(0 AS UInt64 NULL)) AS UInt64) AS (#4)]
+            ├── scalars: [CAST(if(is_not_null(COUNT(*) (#6)), COUNT(*) (#6), 0) AS UInt64) AS (#4)]
             └── Join(Right)
                 ├── build keys: [sa_outer.k (#1)]
                 ├── probe keys: [sa_inner.k (#2)]
@@ -155,7 +155,7 @@ EvalScalar
 └── EvalScalar
     ├── scalars: [CAST(COUNT(*) (#4) AS UInt64 NULL) AS (#6)]
     └── EvalScalar
-        ├── scalars: [CAST(if(is_not_null(COUNT(*) (#5)), COUNT(*) (#5), CAST(0 AS UInt64 NULL)) AS UInt64) AS (#4)]
+        ├── scalars: [CAST(if(is_not_null(COUNT(*) (#5)), COUNT(*) (#5), 0) AS UInt64) AS (#4)]
         └── Join(Inner)
             ├── build keys: [sa_outer.k (#1)]
             ├── probe keys: [sa_inner.k (#2)]
@@ -166,7 +166,7 @@ EvalScalar
             │   ├── order by: []
             │   └── limit: NONE
             └── Filter
-                ├── filters: [gt(CAST(CAST(if(is_not_null(COUNT(*) (#5)), COUNT(*) (#5), CAST(0 AS UInt64 NULL)) AS UInt64) AS UInt64 NULL), 0)]
+                ├── filters: [gt(if(is_not_null(COUNT(*) (#5)), COUNT(*) (#5), 0), 0)]
                 └── Aggregate(Final)
                     ├── group items: [sa_inner.k (#2) AS (#2)]
                     ├── aggregate functions: [count() AS (#5)]
@@ -321,7 +321,7 @@ EvalScalar
 
 optimized_plan:
 EvalScalar
-├── scalars: [sa_outer.id (#0) AS (#0), CAST(if(is_not_null(COUNT(*) (#5)), CAST(COUNT(*) (#5) AS UInt64 NULL), 0) AS UInt64 NULL) AS (#6)]
+├── scalars: [sa_outer.id (#0) AS (#0), CAST(if(is_not_null(COUNT(*) (#5)), COUNT(*) (#5), 0) AS UInt64 NULL) AS (#6)]
 └── Join(Right)
     ├── build keys: [sa_outer.k (#1)]
     ├── probe keys: [sa_inner.k (#2)]

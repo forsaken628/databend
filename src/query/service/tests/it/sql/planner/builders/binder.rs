@@ -104,7 +104,10 @@ async fn test_execute_immediate_uses_inner_timezone_for_statistics() -> anyhow::
             .set_setting("timezone".to_string(), "UTC".to_string())?;
         let (plan, _) = Planner::new(ctx.clone()).plan_sql(sql).await?;
         plans.push(plan.format_indent(
-            FormatOptions { verbose: true },
+            FormatOptions {
+                verbose: true,
+                ..Default::default()
+            },
             &StatContext::new(ctx.get_function_context()?, &ctx.get_settings()),
         )?);
     }

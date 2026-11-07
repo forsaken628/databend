@@ -20,7 +20,7 @@ description: A script UDF called from a SQL scalar UDF body must still be rewrit
 sql: SELECT scalar_wrap_add_one(a) FROM t
 status: ok
 EvalScalar
-├── scalars: [scalar_wrap_add_one(CAST(add_one(x) (#3) AS Int32 NULL)) AS (#2)]
+├── scalars: [scalar_wrap_add_one(add_one(x) (#3)) AS (#2)]
 └── UdfScript
     ├── scalars: [add_one(t.a (#0)) AS (#3)]
     └── EvalScalar

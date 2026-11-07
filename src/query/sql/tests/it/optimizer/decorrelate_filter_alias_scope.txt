@@ -535,7 +535,7 @@ Exchange(Merge)
             │               │           └── num_rows: [1]
             │               └── Join(Inner)
             │                   ├── build keys: [plus(v (#2), 1)]
-            │                   ├── probe keys: [a (#9)]
+            │                   ├── probe keys: [CAST(a (#9) AS UInt16)]
             │                   ├── other filters: []
             │                   ├── Exchange(Broadcast)
             │                   │   └── ConstantTableScan

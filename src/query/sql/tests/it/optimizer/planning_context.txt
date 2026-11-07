@@ -49,7 +49,7 @@ Sort
         ├── EvalScalar
         │   ├── scalars: [1 AS (#3), CAST(1 AS UInt8 NULL) AS (#4)]
         │   └── Filter
-        │       ├── filters: [or_filters(eq(CAST(1 AS UInt8 NULL), 1), gt(now(), '2020-01-01 00:00:00.000000'))]
+        │       ├── filters: [or_filters(eq(1, 1), gt(now(), '2020-01-01 00:00:00.000000'))]
         │       └── DummyTableScan(DummyTableScan { source_table_indexes: [] })
         └── UnionAll
             ├── output: [id (#2)]

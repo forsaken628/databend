@@ -2,7 +2,7 @@
 description: The date_add(day, n, date) scalar-test shape should type check through date arithmetic rewrite.
 sql: date_add(day, delta, date)
 status: ok
-scalar: add_days(date (#6), CAST(delta (#3) AS Int64 NULL))
+scalar: add_days(date (#6), delta (#3))
 type: Date NULL
 
 === date_sub_timestamp_from_function_tests_binds ===

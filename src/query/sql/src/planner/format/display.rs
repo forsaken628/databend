@@ -58,6 +58,10 @@ pub trait OperatorHumanizer<O> {
 #[derive(Debug, Clone, Default)]
 pub struct FormatOptions {
     pub verbose: bool,
+    /// Show all planner-inserted casts. Plan display always shows a root
+    /// AutoCast; nested AutoCasts are hidden unless this option is enabled.
+    /// Explicit casts are always visible.
+    pub show_auto_cast: bool,
 }
 
 /// A default implementation of `OperatorHumanizer`.
@@ -321,73 +325,140 @@ impl<'a, I: IdHumanizer, O> TreeHumanizer<'a, I, O> {
     }
 }
 
-pub fn format_scalar(scalar: &ScalarExpr) -> String {
-    match scalar {
-        ScalarExpr::BoundColumnRef(column_ref) => {
-            if let Some(table_name) = &column_ref.column.table_name {
-                format!(
-                    "{}.{} (#{})",
-                    table_name, column_ref.column.column_name, column_ref.column.index
-                )
-            } else {
-                format!(
-                    "{} (#{})",
-                    column_ref.column.column_name, column_ref.column.index
-                )
+/// Scalar formatting policy shared by standalone expressions and plan output.
+/// A humanizer additionally supplies metadata-based column names and expands
+/// aggregate expressions, as plan formatting did before.
+pub struct ExprDisplay<'a> {
+    options: &'a FormatOptions,
+    id_humanizer: Option<&'a dyn IdHumanizer>,
+}
+
+impl<'a> ExprDisplay<'a> {
+    pub fn new(options: &'a FormatOptions) -> Self {
+        Self {
+            options,
+            id_humanizer: None,
+        }
+    }
+
+    pub fn with_id_humanizer(id_humanizer: &'a dyn IdHumanizer) -> Self {
+        Self {
+            options: id_humanizer.options(),
+            id_humanizer: Some(id_humanizer),
+        }
+    }
+
+    pub fn format_scalar(&self, scalar: &ScalarExpr) -> String {
+        self.format_scalar_inner(scalar, true)
+    }
+
+    #[recursive::recursive]
+    fn format_scalar_inner(&self, scalar: &ScalarExpr, is_root: bool) -> String {
+        match scalar {
+            ScalarExpr::BoundColumnRef(column_ref) => {
+                if let Some(ids) = self.id_humanizer {
+                    return ids.humanize_column_id(column_ref.column.index);
+                }
+                if let Some(table_name) = &column_ref.column.table_name {
+                    format!(
+                        "{}.{} (#{})",
+                        table_name, column_ref.column.column_name, column_ref.column.index
+                    )
+                } else {
+                    format!(
+                        "{} (#{})",
+                        column_ref.column.column_name, column_ref.column.index
+                    )
+                }
             }
-        }
-        ScalarExpr::ConstantExpr(constant) => constant.value.to_string(),
-        ScalarExpr::TypedConstantExpr(constant, _) => constant.value.to_string(),
-        ScalarExpr::WindowFunction(win) => win.display_name.clone(),
-        ScalarExpr::AggregateFunction(agg) => agg.display_name.clone(),
-        ScalarExpr::LambdaFunction(lambda) => {
-            let args = lambda
-                .args
-                .iter()
-                .map(format_scalar)
-                .collect::<Vec<String>>()
-                .join(", ");
-            format!("{}({}, {})", lambda.func_name, args, lambda.lambda_display,)
-        }
-        ScalarExpr::FunctionCall(func) => {
-            let params = func.params.iter().map(|param| param.to_string()).join(", ");
-            let arguments = func.arguments.iter().map(format_scalar).join(", ");
-            if params.is_empty() {
-                format!("{}({})", func.func_name, arguments)
-            } else {
-                format!("{}({})({})", func.func_name, params, arguments)
+            ScalarExpr::ConstantExpr(constant) | ScalarExpr::TypedConstantExpr(constant, _) => {
+                constant.value.to_string()
             }
-        }
-        ScalarExpr::CastExpr(cast) => {
-            format!(
-                "CAST({} AS {})",
-                format_scalar(&cast.argument),
+            ScalarExpr::WindowFunction(win) => win.display_name.clone(),
+            ScalarExpr::AggregateFunction(agg)
+                if self.id_humanizer.is_none() && !self.options.show_auto_cast =>
+            {
+                agg.display_name.clone()
+            }
+            ScalarExpr::AggregateFunction(agg) => {
+                let params = if agg.params.is_empty() {
+                    String::new()
+                } else {
+                    format!("({})", agg.params.iter().join(", "))
+                };
+                let args = agg
+                    .args
+                    .iter()
+                    .map(|arg| self.format_scalar_inner(arg, false))
+                    .join(", ");
+                format!("{}{}({})", agg.func_name, params, args)
+            }
+            ScalarExpr::LambdaFunction(lambda) => {
+                let args = lambda
+                    .args
+                    .iter()
+                    .map(|arg| self.format_scalar_inner(arg, false))
+                    .join(", ");
+                format!("{}({}, {})", lambda.func_name, args, lambda.lambda_display)
+            }
+            ScalarExpr::FunctionCall(func) => {
+                let params = func.params.iter().join(", ");
+                let args = func
+                    .arguments
+                    .iter()
+                    .map(|arg| self.format_scalar_inner(arg, false))
+                    .join(", ");
+                if params.is_empty() {
+                    format!("{}({})", func.func_name, args)
+                } else {
+                    format!("{}({})({})", func.func_name, params, args)
+                }
+            }
+            ScalarExpr::CastExpr(cast) => format!(
+                "{}({} AS {})",
+                if cast.is_try { "TRY_CAST" } else { "CAST" },
+                self.format_scalar_inner(&cast.argument, false),
                 cast.target_type
-            )
-        }
-        ScalarExpr::AutoCast(cast) => {
-            format!(
-                "CAST({} AS {})",
-                format_scalar(&cast.argument),
-                cast.target_type
-            )
-        }
-        ScalarExpr::SubqueryExpr(_) => "SUBQUERY".to_string(),
-        ScalarExpr::UDFCall(udf) => {
-            format!(
+            ),
+            ScalarExpr::AutoCast(cast) => {
+                if self.options.show_auto_cast || (is_root && self.id_humanizer.is_some()) {
+                    format!(
+                        "CAST({} AS {})",
+                        self.format_scalar_inner(&cast.argument, false),
+                        cast.target_type
+                    )
+                } else {
+                    self.format_scalar_inner(&cast.argument, false)
+                }
+            }
+            ScalarExpr::SubqueryExpr(sub) => {
+                if self.id_humanizer.is_some() {
+                    format!("SUBQUERY AS (#{})", sub.output_column.index)
+                } else {
+                    "SUBQUERY".to_string()
+                }
+            }
+            ScalarExpr::UDFCall(udf) => format!(
                 "{}({})",
                 udf.handler,
                 udf.arguments
                     .iter()
-                    .map(format_scalar)
-                    .collect::<Vec<String>>()
+                    .map(|arg| self.format_scalar_inner(arg, false))
                     .join(", ")
-            )
+            ),
+            ScalarExpr::UDFLambdaCall(udf) => {
+                format!(
+                    "{}({})",
+                    udf.func_name,
+                    self.format_scalar_inner(&udf.scalar, false)
+                )
+            }
+            ScalarExpr::UDAFCall(udaf) => udaf.display_name.clone(),
+            ScalarExpr::AsyncFunctionCall(async_func) => async_func.display_name.clone(),
         }
-        ScalarExpr::UDFLambdaCall(udf) => {
-            format!("{}({})", udf.func_name, format_scalar(&udf.scalar))
-        }
-        ScalarExpr::UDAFCall(udaf) => udaf.display_name.clone(),
-        ScalarExpr::AsyncFunctionCall(async_func) => async_func.display_name.clone(),
     }
+}
+
+pub fn format_scalar(scalar: &ScalarExpr) -> String {
+    ExprDisplay::new(&FormatOptions::default()).format_scalar(scalar)
 }

@@ -37,7 +37,7 @@ message: Require 2 parameters, but got: 1
 description: Scalar UDF should resolve its SQL definition and cast to declared return type.
 sql: scalar_to_string(number)
 status: ok
-scalar: scalar_to_string(CAST(CAST(number (#0) AS Int32 NULL) AS String))
+scalar: scalar_to_string(number (#0))
 type: String
 
 === lambda_udf_definition_ignores_alias_scope ===
@@ -65,7 +65,7 @@ message: UDF server is not allowed, you can enable it by setting 'enable_udf_ser
 description: Script UDF should build a runtime UDF call from script metadata.
 sql: script_udf(text)
 status: ok
-scalar: handler(CAST(text (#1) AS String))
+scalar: handler(text (#1))
 type: String
 
 === python_script_udf_cloud_path_uses_adapter_config ===

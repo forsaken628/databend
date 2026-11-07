@@ -1,0 +1,202 @@
+=== filter ===
+description: Display policy changes rendering only, not the bound plan.
+sql: SELECT i FROM display_input WHERE i < 9223372036854775807::Int64
+default:
+EvalScalar
+├── scalars: [display_input.i (#0) AS (#0)]
+└── Filter
+    ├── filters: [lt(display_input.i (#0), 9223372036854775807)]
+    └── Scan
+        ├── table: default.display_input (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+show_auto_cast:
+EvalScalar
+├── scalars: [display_input.i (#0) AS (#0)]
+└── Filter
+    ├── filters: [lt(CAST(display_input.i (#0) AS Int64 NULL), 9223372036854775807)]
+    └── Scan
+        ├── table: default.display_input (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+=== aggregate ===
+description: Display policy changes rendering only, not the bound plan.
+sql: SELECT sum(i) FROM display_input WHERE i < 9223372036854775807::Int64
+default:
+EvalScalar
+├── scalars: [sum(i) (#1) AS (#1)]
+└── Aggregate(Initial)
+    ├── group items: []
+    ├── aggregate functions: [sum(display_input.i (#0)) AS (#1)]
+    └── EvalScalar
+        ├── scalars: [display_input.i (#0) AS (#0)]
+        └── Filter
+            ├── filters: [lt(display_input.i (#0), 9223372036854775807)]
+            └── Scan
+                ├── table: default.display_input (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+show_auto_cast:
+EvalScalar
+├── scalars: [sum(i) (#1) AS (#1)]
+└── Aggregate(Initial)
+    ├── group items: []
+    ├── aggregate functions: [sum(display_input.i (#0)) AS (#1)]
+    └── EvalScalar
+        ├── scalars: [display_input.i (#0) AS (#0)]
+        └── Filter
+            ├── filters: [lt(CAST(display_input.i (#0) AS Int64 NULL), 9223372036854775807)]
+            └── Scan
+                ├── table: default.display_input (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+=== explicit ===
+description: Display policy changes rendering only, not the bound plan.
+sql: SELECT i FROM display_input WHERE CAST(i AS Int64) > 1::Int64
+default:
+EvalScalar
+├── scalars: [display_input.i (#0) AS (#0)]
+└── Filter
+    ├── filters: [gt(CAST(display_input.i (#0) AS Int64 NULL), 1)]
+    └── Scan
+        ├── table: default.display_input (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+show_auto_cast:
+EvalScalar
+├── scalars: [display_input.i (#0) AS (#0)]
+└── Filter
+    ├── filters: [gt(CAST(display_input.i (#0) AS Int64 NULL), 1)]
+    └── Scan
+        ├── table: default.display_input (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+=== root_auto_cast ===
+description: Display policy changes rendering only, not the bound plan.
+sql: SELECT i FROM display_input UNION ALL SELECT 0::Int64
+default:
+UnionAll
+├── output: [i (#2)]
+├── left: [CAST(display_input.i (#0) AS Int64 NULL)]
+├── right: [CAST(0 (#1) AS Int64 NULL)]
+├── cte_scan_names: []
+├── logical_recursive_cte_id: None
+├── EvalScalar
+│   ├── scalars: [display_input.i (#0) AS (#0)]
+│   └── Scan
+│       ├── table: default.display_input (#0)
+│       ├── filters: []
+│       ├── order by: []
+│       └── limit: NONE
+└── EvalScalar
+    ├── scalars: [0 AS (#1)]
+    └── DummyTableScan(DummyTableScan { source_table_indexes: [] })
+
+show_auto_cast:
+UnionAll
+├── output: [i (#2)]
+├── left: [CAST(display_input.i (#0) AS Int64 NULL)]
+├── right: [CAST(0 (#1) AS Int64 NULL)]
+├── cte_scan_names: []
+├── logical_recursive_cte_id: None
+├── EvalScalar
+│   ├── scalars: [display_input.i (#0) AS (#0)]
+│   └── Scan
+│       ├── table: default.display_input (#0)
+│       ├── filters: []
+│       ├── order by: []
+│       └── limit: NONE
+└── EvalScalar
+    ├── scalars: [0 AS (#1)]
+    └── DummyTableScan(DummyTableScan { source_table_indexes: [] })
+
+=== root_auto_cast_with_nested_casts ===
+description: Display policy changes rendering only, not the bound plan.
+sql: SELECT if(i > 1.5, i, 0::Int32) AS value FROM display_input UNION ALL SELECT 0::Int64
+default:
+UnionAll
+├── output: [value (#3)]
+├── left: [CAST(value (#1) AS Int64 NULL)]
+├── right: [CAST(0 (#2) AS Int64 NULL)]
+├── cte_scan_names: []
+├── logical_recursive_cte_id: None
+├── EvalScalar
+│   ├── scalars: [if(gt(display_input.i (#0), 1.5), display_input.i (#0), 0) AS (#1)]
+│   └── Scan
+│       ├── table: default.display_input (#0)
+│       ├── filters: []
+│       ├── order by: []
+│       └── limit: NONE
+└── EvalScalar
+    ├── scalars: [0 AS (#2)]
+    └── DummyTableScan(DummyTableScan { source_table_indexes: [] })
+
+show_auto_cast:
+UnionAll
+├── output: [value (#3)]
+├── left: [CAST(value (#1) AS Int64 NULL)]
+├── right: [CAST(0 (#2) AS Int64 NULL)]
+├── cte_scan_names: []
+├── logical_recursive_cte_id: None
+├── EvalScalar
+│   ├── scalars: [if(gt(CAST(display_input.i (#0) AS Decimal(10, 0) NULL), 1.5), display_input.i (#0), 0) AS (#1)]
+│   └── Scan
+│       ├── table: default.display_input (#0)
+│       ├── filters: []
+│       ├── order by: []
+│       └── limit: NONE
+└── EvalScalar
+    ├── scalars: [0 AS (#2)]
+    └── DummyTableScan(DummyTableScan { source_table_indexes: [] })
+
+=== root_auto_cast_over_explicit ===
+description: Display policy changes rendering only, not the bound plan.
+sql: SELECT CAST(i AS Int16) AS value FROM display_input UNION ALL SELECT 0::Int64
+default:
+UnionAll
+├── output: [value (#3)]
+├── left: [CAST(value (#1) AS Int64 NULL)]
+├── right: [CAST(0 (#2) AS Int64 NULL)]
+├── cte_scan_names: []
+├── logical_recursive_cte_id: None
+├── EvalScalar
+│   ├── scalars: [CAST(display_input.i (#0) AS Int16 NULL) AS (#1)]
+│   └── Scan
+│       ├── table: default.display_input (#0)
+│       ├── filters: []
+│       ├── order by: []
+│       └── limit: NONE
+└── EvalScalar
+    ├── scalars: [0 AS (#2)]
+    └── DummyTableScan(DummyTableScan { source_table_indexes: [] })
+
+show_auto_cast:
+UnionAll
+├── output: [value (#3)]
+├── left: [CAST(value (#1) AS Int64 NULL)]
+├── right: [CAST(0 (#2) AS Int64 NULL)]
+├── cte_scan_names: []
+├── logical_recursive_cte_id: None
+├── EvalScalar
+│   ├── scalars: [CAST(display_input.i (#0) AS Int16 NULL) AS (#1)]
+│   └── Scan
+│       ├── table: default.display_input (#0)
+│       ├── filters: []
+│       ├── order by: []
+│       └── limit: NONE
+└── EvalScalar
+    ├── scalars: [0 AS (#2)]
+    └── DummyTableScan(DummyTableScan { source_table_indexes: [] })
+

@@ -202,7 +202,7 @@ Exchange(Merge)
     │   └── EvalScalar
     │       ├── scalars: [small_table.k (#1) AS (#1), row_number() OVER (ORDER BY k) (#2) AS (#2), CAST(row_number() OVER (ORDER BY k) (#2) AS UInt64 NULL) AS (#3)]
     │       └── Filter
-    │           ├── filters: [lte(CAST(row_number() OVER (ORDER BY k) (#2) AS UInt64 NULL), 10)]
+    │           ├── filters: [lte(row_number() OVER (ORDER BY k) (#2), 10)]
     │           └── Window
     │               ├── aggregate function: row_number
     │               ├── partition items: []

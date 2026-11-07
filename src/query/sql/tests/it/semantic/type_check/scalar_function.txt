@@ -58,7 +58,7 @@ type: Int64
 description: TRY_CAST equivalence comes from its resolved function instead of the function-name prefix.
 sql: try_to_int64(assume_not_null(text))
 status: ok
-scalar: CAST(assume_not_null(text (#1)) AS Int64 NULL)
+scalar: TRY_CAST(assume_not_null(text (#1)) AS Int64 NULL)
 type: Int64 NULL
 
 === decimal_cast_factory_params ===

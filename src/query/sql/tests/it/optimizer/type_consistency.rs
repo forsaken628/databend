@@ -179,10 +179,13 @@ async fn test_inferred_filters_keep_cast_targets_nullable() -> Result<()> {
     for case in &cases {
         let ctx = setup_context(case).await?;
         let plan = ctx.bind_sql(case.sql).await?;
-        let plan = ctx
-            .optimize_plan(plan)
-            .await?
-            .format_indent(Default::default(), &ctx.stat_context()?)?;
+        let plan = ctx.optimize_plan(plan).await?.format_indent(
+            databend_common_sql::FormatOptions {
+                show_auto_cast: true,
+                ..Default::default()
+            },
+            &ctx.stat_context()?,
+        )?;
         let inner_casts = plan
             .match_indices("CAST(cast_inner.n (#")
             .map(|(start, _)| &plan[start..])

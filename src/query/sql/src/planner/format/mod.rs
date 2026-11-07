@@ -17,6 +17,7 @@ mod display_plan;
 mod display_rel_operator;
 
 pub use display::DefaultOperatorHumanizer;
+pub use display::ExprDisplay;
 pub use display::FormatOptions;
 pub use display::IdHumanizer;
 pub use display::MetadataIdHumanizer;

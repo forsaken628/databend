@@ -86,7 +86,7 @@ message: current_database expects 0 arguments, but got 1
 description: coalesce should remove literal NULLs and rewrite to the IF chain.
 sql: coalesce(NULL, text, pattern)
 status: ok
-scalar: if(CAST(is_not_null(text (#1)) AS Boolean NULL), CAST(assume_not_null(text (#1)) AS String NULL), CAST(is_not_null(pattern (#2)) AS Boolean NULL), CAST(assume_not_null(pattern (#2)) AS String NULL), NULL)
+scalar: if(is_not_null(text (#1)), assume_not_null(text (#1)), is_not_null(pattern (#2)), assume_not_null(pattern (#2)), NULL)
 type: String NULL
 
 === decode_rewrites_to_null_safe_if_chain ===
@@ -121,35 +121,35 @@ type: Variant
 description: try_to_variant should use the fallible variant cast rewrite.
 sql: try_to_variant([number, delta])
 status: ok
-scalar: CAST(array(number (#0), CAST(delta (#3) AS Int64 NULL)) AS Variant NULL)
+scalar: TRY_CAST(array(number (#0), delta (#3)) AS Variant NULL)
 type: Variant NULL
 
 === greatest_rewrites_through_array_max ===
 description: greatest should rewrite through an array and null-aware max.
 sql: greatest(number, delta, 1)
 status: ok
-scalar: if(CAST(array_contains(CAST(array(number (#0), CAST(delta (#3) AS Int64 NULL), 1) AS Array(Int64 NULL) NULL), NULL) AS Boolean NULL), NULL, array_max(array(number (#0), CAST(delta (#3) AS Int64 NULL), 1)))
+scalar: if(array_contains(array(number (#0), delta (#3), 1), NULL), NULL, array_max(array(number (#0), delta (#3), 1)))
 type: Int64 NULL
 
 === least_rewrites_through_array_min ===
 description: least should rewrite through an array and null-aware min.
 sql: least(number, delta, 1)
 status: ok
-scalar: if(CAST(array_contains(CAST(array(number (#0), CAST(delta (#3) AS Int64 NULL), 1) AS Array(Int64 NULL) NULL), NULL) AS Boolean NULL), NULL, array_min(array(number (#0), CAST(delta (#3) AS Int64 NULL), 1)))
+scalar: if(array_contains(array(number (#0), delta (#3), 1), NULL), NULL, array_min(array(number (#0), delta (#3), 1)))
 type: Int64 NULL
 
 === greatest_ignore_nulls_rewrites_through_array_max ===
 description: greatest_ignore_nulls should rewrite directly to array_max.
 sql: greatest_ignore_nulls(number, delta, 1)
 status: ok
-scalar: array_max(array(number (#0), CAST(delta (#3) AS Int64 NULL), 1))
+scalar: array_max(array(number (#0), delta (#3), 1))
 type: Int64 NULL
 
 === least_ignore_nulls_rewrites_through_array_min ===
 description: least_ignore_nulls should rewrite directly to array_min.
 sql: least_ignore_nulls(number, delta, 1)
 status: ok
-scalar: array_min(array(number (#0), CAST(delta (#3) AS Int64 NULL), 1))
+scalar: array_min(array(number (#0), delta (#3), 1))
 type: Int64 NULL
 
 === getvariable_constant_name_rewrites_to_context_value ===

@@ -18,7 +18,7 @@ Scan
 ├── order by: []
 └── limit: NONE
 
-when_0: t.k (#0) > CAST(0 AS Int64 NULL)
+when_0: t.k (#0) > 0
 cbo: false, distributed: true
 planned_source:
 Scan
@@ -27,7 +27,7 @@ Scan
 ├── order by: []
 └── limit: NONE
 
-when_0: t.k (#0) > CAST(0 AS Int64 NULL)
+when_0: t.k (#0) > 0
 cbo: true, distributed: false
 planned_source:
 Scan
@@ -36,7 +36,7 @@ Scan
 ├── order by: []
 └── limit: NONE
 
-when_0: t.k (#0) > CAST(0 AS Int64 NULL)
+when_0: t.k (#0) > 0
 cbo: true, distributed: true
 planned_source:
 Scan
@@ -45,7 +45,7 @@ Scan
 ├── order by: []
 └── limit: NONE
 
-when_0: t.k (#0) > CAST(0 AS Int64 NULL)
+when_0: t.k (#0) > 0
 === constant_subquery ===
 description: WHEN decorrelation introduces logical nodes before source planning; branch symbols and source column order survive optimization.
 sql: INSERT ALL WHEN k = (SELECT 1) THEN INTO dst ELSE INTO dst2 SELECT k, v FROM t

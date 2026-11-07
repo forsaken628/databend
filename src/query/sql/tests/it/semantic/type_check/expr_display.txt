@@ -1,0 +1,42 @@
+=== implicit_numeric_cast ===
+sql: delta > 1::Int64
+default: gt(delta (#3), 1)
+show_auto_cast: gt(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+type: Boolean NULL
+
+=== nested_function ===
+sql: if(delta > 1::Int64, number, 0)
+default: if(gt(delta (#3), 1), number (#0), 0)
+show_auto_cast: if(gt(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL)), number (#0), CAST(0 AS Int64 NULL))
+type: Int64 NULL
+
+=== explicit_cast ===
+sql: CAST(delta AS Int64) > 1::Int64
+default: gt(CAST(delta (#3) AS Int64 NULL), 1)
+show_auto_cast: gt(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+type: Boolean NULL
+
+=== explicit_over_implicit ===
+sql: CAST(delta > 1::Int64 AS String)
+default: CAST(gt(delta (#3), 1) AS String NULL)
+show_auto_cast: CAST(gt(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL)) AS String NULL)
+type: String NULL
+
+=== try_cast ===
+sql: TRY_CAST(text AS Int64)
+default: TRY_CAST(text (#1) AS Int64 NULL)
+show_auto_cast: TRY_CAST(text (#1) AS Int64 NULL)
+type: Int64 NULL
+
+=== implicit_over_explicit ===
+sql: CAST(delta AS Int16) > 1::Int64
+default: gt(CAST(delta (#3) AS Int16 NULL), 1)
+show_auto_cast: gt(CAST(CAST(delta (#3) AS Int16 NULL) AS Int64 NULL), CAST(1 AS Int64 NULL))
+type: Boolean NULL
+
+=== ordinary_function ===
+sql: concat(text, pattern)
+default: concat(text (#1), pattern (#2))
+show_auto_cast: concat(text (#1), pattern (#2))
+type: String NULL
+

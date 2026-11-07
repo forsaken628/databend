@@ -105,6 +105,7 @@ impl Interpreter for ExplainInterpreter {
         Box::pin(async move {
             let options = FormatOptions {
                 verbose: self.config.verbose,
+                ..Default::default()
             };
             let blocks = match &self.kind {
                 ExplainKind::Plan if self.config.logical => self.explain_plan(&self.plan)?,
@@ -377,6 +378,7 @@ impl ExplainInterpreter {
     pub fn explain_plan(&self, plan: &Plan) -> Result<Vec<DataBlock>> {
         let options = FormatOptions {
             verbose: self.config.verbose,
+            ..Default::default()
         };
         let stat_context =
             StatContext::new(self.ctx.get_function_context()?, &self.ctx.get_settings());

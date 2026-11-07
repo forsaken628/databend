@@ -630,7 +630,7 @@ where
         &case.histogram_stats,
     )?;
     let raw = raw_plan.format_indent(
-        databend_common_sql::FormatOptions { verbose: false },
+        databend_common_sql::FormatOptions::default(),
         &runner.stat_context()?,
     )?;
     write_result(mint, &format!("{}_raw.txt", case.stem), |f| {

@@ -15,9 +15,21 @@
 use databend_common_expression::type_check;
 use databend_common_expression::type_check::CheckOptions;
 use databend_common_functions::BUILTIN_FUNCTIONS;
+use databend_common_sql::ExprDisplay;
+use databend_common_sql::FormatOptions;
 use databend_common_sql::optimizer::scalar;
 
 use super::*;
+
+// Keep these optimization goldens structural even though user-facing display
+// hides implicit casts by default.
+fn format_scalar(scalar: &ScalarExpr) -> String {
+    ExprDisplay::new(&FormatOptions {
+        show_auto_cast: true,
+        ..Default::default()
+    })
+    .format_scalar(scalar)
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_auto_cast_expression_rules() -> Result<()> {
@@ -126,6 +138,10 @@ async fn test_auto_cast_rules_in_production_pipeline() -> Result<()> {
     use crate::framework::golden::write_case_header;
 
     let mut file = open_golden_file("semantic/type_check", "auto_cast_pipeline.txt")?;
+    let options = FormatOptions {
+        show_auto_cast: true,
+        ..Default::default()
+    };
     for (name, description, sql) in [
         (
             "filter",
@@ -172,13 +188,13 @@ async fn test_auto_cast_rules_in_production_pipeline() -> Result<()> {
         writeln!(
             file,
             "raw_plan:\n{}",
-            raw.format_indent(Default::default(), &ctx.stat_context()?)?
+            raw.format_indent(options.clone(), &ctx.stat_context()?)?
         )?;
         let optimized = ctx.optimize_plan(raw).await?;
         writeln!(
             file,
             "optimized_plan:\n{}",
-            optimized.format_indent(Default::default(), &ctx.stat_context()?)?
+            optimized.format_indent(options.clone(), &ctx.stat_context()?)?
         )?;
     }
     Ok(())
