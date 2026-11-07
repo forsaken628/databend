@@ -63,7 +63,7 @@ pub fn check<Index: ColumnIndex>(
     expr: &RawExpr<Index>,
     fn_registry: &FunctionRegistry,
 ) -> Result<Expr<Index>> {
-    check_impl(expr, fn_registry, CheckOptions::default())
+    ExprChecker::new(fn_registry, CheckOptions::default()).check(expr)
 }
 
 pub fn check_with_options<Index: ColumnIndex>(
@@ -71,123 +71,305 @@ pub fn check_with_options<Index: ColumnIndex>(
     fn_registry: &FunctionRegistry,
     options: CheckOptions,
 ) -> Result<Expr<Index>> {
-    check_impl(expr, fn_registry, options)
+    ExprChecker::new(fn_registry, options).check(expr)
 }
 
-#[recursive::recursive]
-fn check_impl<Index: ColumnIndex>(
-    expr: &RawExpr<Index>,
-    fn_registry: &FunctionRegistry,
+/// Recursive expression and function checking under one registry and policy.
+pub struct ExprChecker<'a> {
+    fn_registry: &'a FunctionRegistry,
     options: CheckOptions,
-) -> Result<Expr<Index>> {
-    match expr {
-        RawExpr::Constant {
-            span,
-            scalar,
-            data_type,
-        } => Ok(Constant {
-            span: *span,
-            scalar: scalar.clone(),
-            data_type: data_type
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| scalar.as_ref().infer_data_type()),
-        }
-        .into()),
-        RawExpr::ColumnRef {
-            span,
-            id,
-            data_type,
-            display_name,
-        } => Ok(ColumnRef {
-            span: *span,
-            id: id.clone(),
-            data_type: data_type.clone(),
-            display_name: display_name.clone(),
-        }
-        .into()),
-        RawExpr::Cast {
-            span,
-            is_try,
-            expr,
-            dest_type,
-        } => {
-            let expr = check_impl(expr, fn_registry, options)?;
-            check_cast(*span, *is_try, expr, dest_type, fn_registry)
-        }
-        RawExpr::FunctionCall {
-            span,
-            name,
-            args,
-            params,
-        } => {
-            let mut args_expr: Vec<_> = args
-                .iter()
-                .map(|arg| check_impl(arg, fn_registry, options))
-                .try_collect()?;
+}
 
-            // https://github.com/datafuselabs/databend/issues/11541
-            // c:int16 = 12456 will be resolve as `to_int32(c) == to_int32(12456)`
-            // This may hurt the bloom filter, we should try cast to literal as the datatype of column
-            if name == "eq" && args_expr.len() == 2 {
-                match args_expr.as_mut_slice() {
-                    [
-                        e,
-                        Expr::Constant(Constant {
-                            span,
-                            scalar,
-                            data_type,
-                        }),
-                    ]
-                    | [
-                        Expr::Constant(Constant {
-                            span,
-                            scalar,
-                            data_type,
-                        }),
-                        e,
-                    ] => {
-                        let src_ty = data_type.remove_nullable();
-                        let dest_ty = e.data_type().remove_nullable();
+impl<'a> ExprChecker<'a> {
+    pub fn new(fn_registry: &'a FunctionRegistry, options: CheckOptions) -> Self {
+        Self {
+            fn_registry,
+            options,
+        }
+    }
 
-                        if dest_ty.is_integer() && src_ty.is_integer() {
-                            if let Ok(casted_scalar) =
-                                cast_scalar(*span, scalar.clone(), &dest_ty, fn_registry)
-                            {
-                                *scalar = casted_scalar;
-                                *data_type = scalar.as_ref().infer_data_type();
+    #[recursive::recursive]
+    pub fn check<Index: ColumnIndex>(&self, expr: &RawExpr<Index>) -> Result<Expr<Index>> {
+        match expr {
+            RawExpr::Constant {
+                span,
+                scalar,
+                data_type,
+            } => Ok(Constant {
+                span: *span,
+                scalar: scalar.clone(),
+                data_type: data_type
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| scalar.as_ref().infer_data_type()),
+            }
+            .into()),
+            RawExpr::ColumnRef {
+                span,
+                id,
+                data_type,
+                display_name,
+            } => Ok(ColumnRef {
+                span: *span,
+                id: id.clone(),
+                data_type: data_type.clone(),
+                display_name: display_name.clone(),
+            }
+            .into()),
+            RawExpr::Cast {
+                span,
+                is_try,
+                expr,
+                dest_type,
+            } => {
+                let expr = self.check(expr)?;
+                check_cast(*span, *is_try, expr, dest_type, self.fn_registry)
+            }
+            RawExpr::FunctionCall {
+                span,
+                name,
+                args,
+                params,
+            } => {
+                let mut args_expr: Vec<_> = args.iter().map(|arg| self.check(arg)).try_collect()?;
+
+                // https://github.com/datafuselabs/databend/issues/11541
+                // c:int16 = 12456 will be resolve as `to_int32(c) == to_int32(12456)`
+                // This may hurt the bloom filter, we should try cast to literal as the datatype of column
+                if name == "eq" && args_expr.len() == 2 {
+                    match args_expr.as_mut_slice() {
+                        [
+                            e,
+                            Expr::Constant(Constant {
+                                span,
+                                scalar,
+                                data_type,
+                            }),
+                        ]
+                        | [
+                            Expr::Constant(Constant {
+                                span,
+                                scalar,
+                                data_type,
+                            }),
+                            e,
+                        ] => {
+                            let src_ty = data_type.remove_nullable();
+                            let dest_ty = e.data_type().remove_nullable();
+
+                            if dest_ty.is_integer() && src_ty.is_integer() {
+                                if let Ok(casted_scalar) =
+                                    cast_scalar(*span, scalar.clone(), &dest_ty, self.fn_registry)
+                                {
+                                    *scalar = casted_scalar;
+                                    *data_type = scalar.as_ref().infer_data_type();
+                                }
                             }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
+
+                self.check_function(*span, name, params, &args_expr)
             }
-
-            check_function_impl(*span, name, params, &args_expr, fn_registry, options)
-        }
-        RawExpr::LambdaFunctionCall {
-            span,
-            name,
-            args,
-            lambda_expr,
-            lambda_display,
-            return_type,
-        } => {
-            let args: Vec<_> = args
-                .iter()
-                .map(|arg| check_impl(arg, fn_registry, options))
-                .try_collect()?;
-
-            Ok(LambdaFunctionCall {
-                span: *span,
-                name: name.clone(),
+            RawExpr::LambdaFunctionCall {
+                span,
+                name,
                 args,
-                lambda_expr: lambda_expr.clone(),
-                lambda_display: lambda_display.clone(),
-                return_type: return_type.clone(),
+                lambda_expr,
+                lambda_display,
+                return_type,
+            } => {
+                let args: Vec<_> = args.iter().map(|arg| self.check(arg)).try_collect()?;
+
+                Ok(LambdaFunctionCall {
+                    span: *span,
+                    name: name.clone(),
+                    args,
+                    lambda_expr: lambda_expr.clone(),
+                    lambda_display: lambda_display.clone(),
+                    return_type: return_type.clone(),
+                }
+                .into())
             }
-            .into())
         }
+    }
+
+    #[recursive::recursive]
+    pub fn check_function<Index: ColumnIndex>(
+        &self,
+        span: Span,
+        name: &str,
+        params: &[Scalar],
+        args: &[Expr<Index>],
+    ) -> Result<Expr<Index>> {
+        if let Some(original_fn_name) = self.fn_registry.aliases.get(name) {
+            return self.check_function(span, original_fn_name, params, args);
+        }
+
+        // to_string('a')
+        if params.is_empty() && name.starts_with("to_") && args.len() == 1 {
+            let type_name = args[0].data_type();
+            match get_simple_cast_function(false, type_name, type_name) {
+                Some(n) if name.eq_ignore_ascii_case(n) => return Ok(args[0].clone()),
+                _ => {}
+            }
+        }
+
+        let candidates = self.fn_registry.search_candidates(name, params, args);
+
+        if candidates.is_empty() && !self.fn_registry.contains(name) {
+            return Err(
+                ErrorCode::UnknownFunction(format!("function `{name}` does not exist"))
+                    .set_span(span),
+            );
+        }
+
+        // Do not check grouping
+        if name == "grouping" {
+            debug_assert!(!candidates.is_empty());
+            let (id, function) = candidates.into_iter().next().unwrap();
+            let return_type = function.signature.return_type.clone();
+            return Ok(Expr::FunctionCall(FunctionCall {
+                span,
+                id: Box::new(id),
+                function,
+                generics: vec![],
+                args: args.to_vec(),
+                return_type,
+            }));
+        }
+
+        let auto_cast_rules = self.fn_registry.get_auto_cast_rules(name);
+        let dynamic_cast_rules = self.fn_registry.get_dynamic_cast_rules(name);
+
+        let mut fail_reasons = SmallVec::<[_; 1]>::with_capacity(candidates.len());
+        let mut first_coerced = None;
+        for (id, func) in &candidates {
+            match self.try_check_function(
+                args,
+                &func.signature,
+                auto_cast_rules,
+                &dynamic_cast_rules,
+            ) {
+                Ok((checked_args, return_type, generics)) => {
+                    if self.options.forbid_column_casts
+                        && args.iter().zip(&checked_args).any(|(source, checked)| {
+                            source.contains_column_ref()
+                                && source.data_type() != checked.data_type()
+                        })
+                    {
+                        fail_reasons.push(ErrorCode::SemanticError(
+                            "signature requires an implicit cast of a runtime input",
+                        ));
+                        continue;
+                    }
+                    let exact = args
+                        .iter()
+                        .zip(&checked_args)
+                        .all(|(source, checked)| source.data_type() == checked.data_type());
+                    let checked = Expr::FunctionCall(FunctionCall {
+                        span,
+                        id: Box::new(id.clone()),
+                        function: func.clone(),
+                        generics,
+                        args: checked_args,
+                        return_type,
+                    });
+                    if !self.options.prefer_exact_arguments || exact {
+                        return Ok(checked);
+                    }
+                    if first_coerced.is_none() {
+                        first_coerced = Some(checked);
+                    }
+                }
+                Err(err) => fail_reasons.push(err),
+            }
+        }
+
+        if let Some(checked) = first_coerced {
+            return Ok(checked);
+        }
+        let mut msg = format_no_matching_function_signature(name, params, args);
+
+        if !candidates.is_empty() {
+            let candidates_sig: Vec<_> = candidates
+                .iter()
+                .map(|(_, func)| func.signature.to_string())
+                .collect();
+
+            let max_len = candidates_sig.iter().map(|s| s.len()).max().unwrap_or(0);
+
+            let candidates_len = candidates_sig.len();
+            let take_len = candidates_len.min(3);
+            let candidates_fail_reason = candidates_sig
+                .into_iter()
+                .take(3)
+                .zip(fail_reasons)
+                .map(|(sig, err)| format!("  {sig:<max_len$}  : {}", err.message()))
+                .join("\n");
+
+            write!(
+                &mut msg,
+                "\n\ncandidate functions:\n{candidates_fail_reason}",
+            )
+            .unwrap();
+            if candidates_len > take_len {
+                write!(&mut msg, "\n... and {} more", candidates_len - take_len).unwrap();
+            }
+        };
+
+        Err(ErrorCode::SemanticError(msg).set_span(span))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn try_check_function<Index: ColumnIndex>(
+        &self,
+        args: &[Expr<Index>],
+        sig: &FunctionSignature,
+        auto_cast_rules: AutoCastRules,
+        dynamic_cast_rules: &DynamicCastRules,
+    ) -> Result<(Vec<Expr<Index>>, DataType, Vec<DataType>)> {
+        let subst = try_unify_signature(
+            args.iter().map(Expr::data_type),
+            sig.args_type.iter(),
+            auto_cast_rules,
+            dynamic_cast_rules,
+        )?;
+
+        let checked_args = args
+            .iter()
+            .zip(&sig.args_type)
+            .map(|(arg, sig_type)| {
+                let sig_type = subst.apply(sig_type)?;
+                let is_try = self
+                    .fn_registry
+                    .is_auto_try_cast_rule(arg.data_type(), &sig_type);
+                check_cast(arg.span(), is_try, arg.clone(), &sig_type, self.fn_registry)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let return_type = subst.apply(&sig.return_type)?;
+        assert!(!return_type.has_nested_nullable());
+
+        let generics = subst
+            .0
+            .keys()
+            .cloned()
+            .max()
+            .map(|max_generic_idx| {
+                (0..max_generic_idx + 1)
+                    .map(|idx| {
+                        subst.0.get(&idx).cloned().ok_or_else(|| {
+                            ErrorCode::from_string_no_backtrace(format!(
+                                "unable to resolve generic T{idx}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .unwrap_or_else(|| Ok(vec![]))?;
+
+        Ok((checked_args, return_type, generics))
     }
 }
 
@@ -344,141 +526,7 @@ pub fn check_function<Index: ColumnIndex>(
     args: &[Expr<Index>],
     fn_registry: &FunctionRegistry,
 ) -> Result<Expr<Index>> {
-    check_function_impl(
-        span,
-        name,
-        params,
-        args,
-        fn_registry,
-        CheckOptions::default(),
-    )
-}
-
-#[recursive::recursive]
-fn check_function_impl<Index: ColumnIndex>(
-    span: Span,
-    name: &str,
-    params: &[Scalar],
-    args: &[Expr<Index>],
-    fn_registry: &FunctionRegistry,
-    options: CheckOptions,
-) -> Result<Expr<Index>> {
-    if let Some(original_fn_name) = fn_registry.aliases.get(name) {
-        return check_function_impl(span, original_fn_name, params, args, fn_registry, options);
-    }
-
-    // to_string('a')
-    if params.is_empty() && name.starts_with("to_") && args.len() == 1 {
-        let type_name = args[0].data_type();
-        match get_simple_cast_function(false, type_name, type_name) {
-            Some(n) if name.eq_ignore_ascii_case(n) => return Ok(args[0].clone()),
-            _ => {}
-        }
-    }
-
-    let candidates = fn_registry.search_candidates(name, params, args);
-
-    if candidates.is_empty() && !fn_registry.contains(name) {
-        return Err(
-            ErrorCode::UnknownFunction(format!("function `{name}` does not exist")).set_span(span),
-        );
-    }
-
-    // Do not check grouping
-    if name == "grouping" {
-        debug_assert!(!candidates.is_empty());
-        let (id, function) = candidates.into_iter().next().unwrap();
-        let return_type = function.signature.return_type.clone();
-        return Ok(Expr::FunctionCall(FunctionCall {
-            span,
-            id: Box::new(id),
-            function,
-            generics: vec![],
-            args: args.to_vec(),
-            return_type,
-        }));
-    }
-
-    let auto_cast_rules = fn_registry.get_auto_cast_rules(name);
-    let dynamic_cast_rules = fn_registry.get_dynamic_cast_rules(name);
-
-    let mut fail_reasons = SmallVec::<[_; 1]>::with_capacity(candidates.len());
-    let mut first_coerced = None;
-    for (id, func) in &candidates {
-        match try_check_function(
-            args,
-            &func.signature,
-            auto_cast_rules,
-            &dynamic_cast_rules,
-            fn_registry,
-        ) {
-            Ok((checked_args, return_type, generics)) => {
-                if options.forbid_column_casts
-                    && args.iter().zip(&checked_args).any(|(source, checked)| {
-                        source.contains_column_ref() && source.data_type() != checked.data_type()
-                    })
-                {
-                    fail_reasons.push(ErrorCode::SemanticError(
-                        "signature requires an implicit cast of a runtime input",
-                    ));
-                    continue;
-                }
-                let exact = args
-                    .iter()
-                    .zip(&checked_args)
-                    .all(|(source, checked)| source.data_type() == checked.data_type());
-                let checked = Expr::FunctionCall(FunctionCall {
-                    span,
-                    id: Box::new(id.clone()),
-                    function: func.clone(),
-                    generics,
-                    args: checked_args,
-                    return_type,
-                });
-                if !options.prefer_exact_arguments || exact {
-                    return Ok(checked);
-                }
-                if first_coerced.is_none() {
-                    first_coerced = Some(checked);
-                }
-            }
-            Err(err) => fail_reasons.push(err),
-        }
-    }
-
-    if let Some(checked) = first_coerced {
-        return Ok(checked);
-    }
-    let mut msg = format_no_matching_function_signature(name, params, args);
-
-    if !candidates.is_empty() {
-        let candidates_sig: Vec<_> = candidates
-            .iter()
-            .map(|(_, func)| func.signature.to_string())
-            .collect();
-
-        let max_len = candidates_sig.iter().map(|s| s.len()).max().unwrap_or(0);
-
-        let candidates_len = candidates_sig.len();
-        let take_len = candidates_len.min(3);
-        let candidates_fail_reason = candidates_sig
-            .into_iter()
-            .take(3)
-            .zip(fail_reasons)
-            .map(|(sig, err)| format!("  {sig:<max_len$}  : {}", err.message()))
-            .join("\n");
-
-        write!(
-            &mut msg,
-            "\n\ncandidate functions:\n{candidates_fail_reason}",
-        )
-        .unwrap();
-        if candidates_len > take_len {
-            write!(&mut msg, "\n... and {} more", candidates_len - take_len).unwrap();
-        }
-    };
-
-    Err(ErrorCode::SemanticError(msg).set_span(span))
+    ExprChecker::new(fn_registry, CheckOptions::default()).check_function(span, name, params, args)
 }
 
 pub fn infer_function_return_type<T>(
@@ -502,13 +550,12 @@ where
             })
         })
         .collect::<Vec<_>>();
-    Ok(
-        check_function_impl(span, name, params, &arguments, fn_registry, CheckOptions {
-            prefer_exact_arguments: true,
-            ..Default::default()
-        })?
-        .into_data_type(),
-    )
+    Ok(ExprChecker::new(fn_registry, CheckOptions {
+        prefer_exact_arguments: true,
+        ..Default::default()
+    })
+    .check_function(span, name, params, &arguments)?
+    .into_data_type())
 }
 
 fn format_function_signature<Index: ColumnIndex>(
@@ -686,44 +733,12 @@ pub fn try_check_function<Index: ColumnIndex>(
     dynamic_cast_rules: &DynamicCastRules,
     fn_registry: &FunctionRegistry,
 ) -> Result<(Vec<Expr<Index>>, DataType, Vec<DataType>)> {
-    let subst = try_unify_signature(
-        args.iter().map(Expr::data_type),
-        sig.args_type.iter(),
+    ExprChecker::new(fn_registry, CheckOptions::default()).try_check_function(
+        args,
+        sig,
         auto_cast_rules,
         dynamic_cast_rules,
-    )?;
-
-    let checked_args = args
-        .iter()
-        .zip(&sig.args_type)
-        .map(|(arg, sig_type)| {
-            let sig_type = subst.apply(sig_type)?;
-            let is_try = fn_registry.is_auto_try_cast_rule(arg.data_type(), &sig_type);
-            check_cast(arg.span(), is_try, arg.clone(), &sig_type, fn_registry)
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let return_type = subst.apply(&sig.return_type)?;
-    assert!(!return_type.has_nested_nullable());
-
-    let generics = subst
-        .0
-        .keys()
-        .cloned()
-        .max()
-        .map(|max_generic_idx| {
-            (0..max_generic_idx + 1)
-                .map(|idx| {
-                    subst.0.get(&idx).cloned().ok_or_else(|| {
-                        ErrorCode::from_string_no_backtrace(format!(
-                            "unable to resolve generic T{idx}"
-                        ))
-                    })
-                })
-                .collect::<Result<Vec<_>>>()
-        })
-        .unwrap_or_else(|| Ok(vec![]))?;
-
-    Ok((checked_args, return_type, generics))
+    )
 }
 
 pub fn try_unify_signature(

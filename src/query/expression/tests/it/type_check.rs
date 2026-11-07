@@ -26,6 +26,7 @@ use databend_common_expression::domain_evaluator;
 use databend_common_expression::scalar_evaluator;
 use databend_common_expression::type_check;
 use databend_common_expression::type_check::CheckOptions;
+use databend_common_expression::type_check::ExprChecker;
 use databend_common_expression::types::DataType;
 use databend_common_expression::types::NumberDataType;
 
@@ -55,9 +56,10 @@ fn inference_options_cover_nested_calls() -> Result<()> {
     register_predicate(&mut registry, "probe", int64.clone());
     register_predicate(&mut registry, "probe", int32.clone());
     register_predicate(&mut registry, "and", DataType::Boolean);
+    registry.register_aliases("probe", &["probe_alias"]);
     let predicate = RawExpr::FunctionCall {
         span: None,
-        name: "probe".to_string(),
+        name: "probe_alias".to_string(),
         params: vec![],
         args: vec![
             RawExpr::ColumnRef {
@@ -99,12 +101,19 @@ fn inference_options_cover_nested_calls() -> Result<()> {
             assert_eq!(call.args[1].data_type(), expected);
         }
     };
-    let default = type_check::check(&raw, &registry)?;
+    let checker = ExprChecker::new(&registry, CheckOptions::default());
+    let default = checker.check(&raw)?;
+    assert_eq!(default, type_check::check(&raw, &registry)?);
     assert_argument_types(&default, &int64);
-    let constrained = type_check::check_with_options(&raw, &registry, CheckOptions {
+    let options = CheckOptions {
         forbid_column_casts: true,
         ..Default::default()
-    })?;
+    };
+    let constrained = ExprChecker::new(&registry, options).check(&raw)?;
+    assert_eq!(
+        constrained,
+        type_check::check_with_options(&raw, &registry, options)?
+    );
     assert_ne!(default, constrained);
     assert_argument_types(&constrained, &int32);
     let exact = type_check::check_with_options(&raw, &registry, CheckOptions {
