@@ -28,6 +28,151 @@ use goldenfile::Mint;
 use super::run_ast;
 
 #[test]
+fn test_variant_comparison_checker_preserves_semantics() {
+    use std::collections::HashMap;
+
+    use databend_common_expression::Expr;
+    use databend_common_expression::FoldRules;
+    use databend_common_expression::RawExpr;
+    use databend_common_expression::Scalar;
+    use databend_common_expression::type_check::CheckOptions;
+    use databend_common_expression::type_check::ExprChecker;
+    use databend_common_expression_test_support::parse_raw_expr;
+
+    for nullable in [false, true] {
+        let variant_type = if nullable {
+            DataType::Variant.wrap_nullable()
+        } else {
+            DataType::Variant
+        };
+        for (operator, equal) in [("=", true), ("<>", false)] {
+            for sql in [format!("v {operator} '1'"), format!("'1' {operator} v")] {
+                let raw = parse_raw_expr(&sql, &[("v", variant_type.clone())], &BUILTIN_FUNCTIONS);
+                for options in [CheckOptions::default(), CheckOptions {
+                    prefer_exact_arguments: true,
+                    ..Default::default()
+                }] {
+                    let checker = ExprChecker::new(&BUILTIN_FUNCTIONS, options);
+                    let checked = checker.check(&raw).unwrap();
+                    assert_eq!(checked.data_type(), &DataType::Boolean.wrap_nullable());
+                    let RawExpr::FunctionCall {
+                        span,
+                        name,
+                        params,
+                        args,
+                    } = &raw
+                    else {
+                        panic!("expected comparison")
+                    };
+                    let args = args
+                        .iter()
+                        .map(|arg| checker.check(arg).unwrap())
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        checker.check_function(*span, name, params, &args).unwrap(),
+                        checked,
+                        "{sql}"
+                    );
+                    let Expr::FunctionCall(call) = &checked else {
+                        panic!("expected checked comparison")
+                    };
+                    assert!(
+                        call.args
+                            .iter()
+                            .all(|arg| arg.data_type().remove_nullable() == DataType::Variant)
+                    );
+                    assert!(checked.sql_display().contains("to_variant"), "{checked:?}");
+                    assert_eq!(
+                        checker
+                            .check_function(*span, name, params, &call.args)
+                            .unwrap(),
+                        checked,
+                        "checked arguments must not acquire another conversion: {sql}"
+                    );
+                    if nullable {
+                        let constrained = ExprChecker::new(&BUILTIN_FUNCTIONS, CheckOptions {
+                            forbid_column_casts: true,
+                            ..options
+                        });
+                        assert_eq!(constrained.check(&raw).unwrap(), checked, "{sql}");
+                    }
+                    for (json, matches) in [("1", false), (r#""1""#, true), ("null", false)] {
+                        let value =
+                            Scalar::Variant(jsonb::parse_value(json.as_bytes()).unwrap().to_vec());
+                        let expr = checked.fill_const_column(&HashMap::from([(0, value)]));
+                        assert_eq!(
+                            FoldRules::eval_constant(
+                                &FunctionContext::default(),
+                                &BUILTIN_FUNCTIONS,
+                                &expr
+                            ),
+                            Some(Scalar::Boolean(matches == equal)),
+                            "{sql}, {json}"
+                        );
+                    }
+                    if nullable {
+                        let expr = checked.fill_const_column(&HashMap::from([(0, Scalar::Null)]));
+                        assert_eq!(
+                            FoldRules::eval_constant(
+                                &FunctionContext::default(),
+                                &BUILTIN_FUNCTIONS,
+                                &expr
+                            ),
+                            Some(Scalar::Null),
+                            "{sql}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_variant_conversion_parse_wrap_and_try_are_distinct() {
+    use std::collections::HashMap;
+
+    use databend_common_expression::FoldRules;
+    use databend_common_expression::Scalar;
+    use databend_common_expression_test_support::parse_raw_expr;
+
+    let json_number = Scalar::Variant(jsonb::parse_value(b"1").unwrap().to_vec());
+    let json_string = Scalar::Variant(jsonb::parse_value(br#""1""#).unwrap().to_vec());
+    let json_invalid_text = Scalar::Variant(jsonb::parse_value(br#""not JSON""#).unwrap().to_vec());
+    for (sql, input, expected) in [
+        ("CAST(s AS Variant)", "1", Some(json_number)),
+        ("to_variant(s)", "1", Some(json_string)),
+        ("CAST(s AS Variant)", "not JSON", None),
+        ("TRY_CAST(s AS Variant)", "not JSON", Some(Scalar::Null)),
+        ("to_variant(s)", "not JSON", Some(json_invalid_text)),
+    ] {
+        let raw = parse_raw_expr(sql, &[("s", DataType::String)], &BUILTIN_FUNCTIONS);
+        let checked = type_check::check(&raw, &BUILTIN_FUNCTIONS).unwrap();
+        let expr =
+            checked.fill_const_column(&HashMap::from([(0, Scalar::String(input.to_string()))]));
+        assert_eq!(
+            FoldRules::eval_constant(&FunctionContext::default(), &BUILTIN_FUNCTIONS, &expr),
+            expected,
+            "{sql}, {input}"
+        );
+    }
+    for (sql, expected) in [
+        ("CAST(v AS Int64)", None),
+        ("TRY_CAST(v AS Int64)", Some(Scalar::Null)),
+    ] {
+        let raw = parse_raw_expr(sql, &[("v", DataType::Variant)], &BUILTIN_FUNCTIONS);
+        let checked = type_check::check(&raw, &BUILTIN_FUNCTIONS).unwrap();
+        let value = Scalar::Variant(jsonb::parse_value(br#""not a number""#).unwrap().to_vec());
+        let expr = checked.fill_const_column(&HashMap::from([(0, value)]));
+        assert_eq!(
+            FoldRules::eval_constant(&FunctionContext::default(), &BUILTIN_FUNCTIONS, &expr),
+            expected,
+            "{sql}"
+        );
+    }
+}
+
+#[test]
 fn test_like_any_rebinds_materialized_nullable_arguments() {
     use std::collections::HashMap;
 

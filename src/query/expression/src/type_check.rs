@@ -216,6 +216,10 @@ impl<'a> ExprChecker<'a> {
             }
         }
 
+        if let Some(checked) = self.try_check_variant_comparison(span, name, params, args) {
+            return checked;
+        }
+
         let candidates = self.fn_registry.search_candidates(name, params, args);
 
         if candidates.is_empty() && !self.fn_registry.contains(name) {
@@ -320,6 +324,54 @@ impl<'a> ExprChecker<'a> {
         };
 
         Err(ErrorCode::SemanticError(msg).set_span(span))
+    }
+
+    /// Variant equality wraps a String literal as a JSON string rather than
+    /// parsing JSON text or converting the runtime Variant to String. Decide
+    /// this before overload selection; the returned wrappers are executable
+    /// semantics, not hints that a later optimizer may reinterpret.
+    fn try_check_variant_comparison<Index: ColumnIndex>(
+        &self,
+        span: Span,
+        name: &str,
+        params: &[Scalar],
+        args: &[Expr<Index>],
+    ) -> Option<Result<Expr<Index>>> {
+        if !matches!(name, "eq" | "noteq") || !params.is_empty() || args.len() != 2 {
+            return None;
+        }
+        let index = (0..2).find(|&index| {
+            matches!(
+                &args[index],
+                Expr::Constant(Constant {
+                    scalar: Scalar::String(_),
+                    data_type: DataType::String,
+                    ..
+                })
+            ) && args[1 - index].data_type().remove_nullable() == DataType::Variant
+                && args[1 - index].contains_column_ref()
+        })?;
+        Some((|| {
+            // CAST(String AS Variant) means parse_json, not to_variant.
+            let wrapped = self.check_function(
+                args[index].span(),
+                "to_variant",
+                &[],
+                std::slice::from_ref(&args[index]),
+            )?;
+            // Preserve the Nullable(Boolean) contract of the original
+            // Variant-to-String comparison, including non-nullable inputs.
+            let wrapped = check_cast(
+                wrapped.span(),
+                false,
+                wrapped,
+                &DataType::Variant.wrap_nullable(),
+                self.fn_registry,
+            )?;
+            let mut arguments = args.to_vec();
+            arguments[index] = wrapped;
+            self.check_function(span, name, params, &arguments)
+        })())
     }
 
     #[allow(clippy::type_complexity)]

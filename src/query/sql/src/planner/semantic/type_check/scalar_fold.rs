@@ -838,22 +838,7 @@ where A: TypeCheckAdapter
                 arguments: folded_args
                     .into_iter()
                     .zip(call.args)
-                    .map(|(arg, checked)| match checked {
-                        EExpr::Cast(cast) if arg.data_type != cast.dest_type => {
-                            if cast.is_try {
-                                CastExpr {
-                                    span: cast.span,
-                                    is_try: true,
-                                    argument: Box::new(arg.scalar),
-                                    target_type: Box::new(cast.dest_type),
-                                }
-                                .into()
-                            } else {
-                                ScalarExpr::AutoCast(AutoCastExpr::new(arg.scalar, cast.dest_type))
-                            }
-                        }
-                        _ => arg.scalar,
-                    })
+                    .map(|(arg, checked)| Self::materialize_checked_argument(arg.scalar, checked))
                     .collect(),
                 func_name: func_name.to_string(),
                 return_type: Box::new(return_type.clone()),
@@ -862,6 +847,50 @@ where A: TypeCheckAdapter
             data_type: return_type,
             facts,
         })
+    }
+
+    /// Attach the coercions selected by ExprChecker to the original bound
+    /// child. Stop at its type boundary so that placeholders never replace
+    /// the child itself. Variant conversions and TRY_CAST carry fixed value
+    /// semantics; only ordinary coercions become optimizable AutoCasts.
+    #[recursive::recursive]
+    fn materialize_checked_argument(argument: ScalarExpr, checked: EExpr<usize>) -> ScalarExpr {
+        if checked.data_type() == argument.data_type().as_ref() {
+            return argument;
+        }
+        match checked {
+            EExpr::Cast(cast) => {
+                let fixed_semantics = cast.is_try
+                    || cast.expr.data_type().remove_nullable() == DataType::Variant
+                    || cast.dest_type.remove_nullable() == DataType::Variant;
+                let argument = Self::materialize_checked_argument(argument, *cast.expr);
+                if fixed_semantics {
+                    CastExpr {
+                        span: cast.span,
+                        is_try: cast.is_try,
+                        argument: Box::new(argument),
+                        target_type: Box::new(cast.dest_type),
+                    }
+                    .into()
+                } else {
+                    ScalarExpr::AutoCast(AutoCastExpr::new(argument, cast.dest_type))
+                }
+            }
+            EExpr::FunctionCall(mut call)
+                if call.function.signature.name == "to_variant" && call.args.len() == 1 =>
+            {
+                let checked = call.args.pop().unwrap();
+                FunctionCall {
+                    span: call.span,
+                    func_name: call.function.signature.name.clone(),
+                    params: vec![],
+                    arguments: vec![Self::materialize_checked_argument(argument, checked)],
+                    return_type: Box::new(call.return_type),
+                }
+                .into()
+            }
+            _ => argument,
+        }
     }
 
     /// The branch an `if` call always yields. A constant branch is typed as

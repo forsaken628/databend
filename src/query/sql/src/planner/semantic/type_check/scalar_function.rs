@@ -316,31 +316,7 @@ where A: TypeCheckAdapter
             }
         }
 
-        let result = self.resolve_bound_function_call(span, func_name, vec![], args)?;
-        if (func_name == "eq" || func_name == "noteq")
-            && Self::compares_variant_with_constant(&result.scalar)
-        {
-            let pair = self.rewrite_variant_compare_constant(result.scalar, result.data_type)?;
-            Ok(self.bind_derived_pair(pair))
-        } else {
-            Ok(result)
-        }
-    }
-
-    /// Whether `rewrite_variant_compare_constant` may rewrite the call.
-    fn compares_variant_with_constant(scalar: &ScalarExpr) -> bool {
-        let ScalarExpr::FunctionCall(func) = scalar else {
-            return false;
-        };
-        func.arguments.len() == 2
-            && func
-                .arguments
-                .iter()
-                .any(|arg| matches!(arg, ScalarExpr::ConstantExpr(_)))
-            && func
-                .arguments
-                .iter()
-                .any(|arg| arg.data_type().remove_nullable() == DataType::Variant)
+        self.resolve_bound_function_call(span, func_name, vec![], args)
     }
 
     pub(super) fn resolve_cast_expr(
@@ -432,60 +408,6 @@ where A: TypeCheckAdapter
         };
         let expr = type_check::check(&raw_expr, &BUILTIN_FUNCTIONS).ok()?;
         FoldRules::eval_constant(&self.func_ctx, &BUILTIN_FUNCTIONS, &expr)
-    }
-
-    pub(super) fn rewrite_variant_compare_constant(
-        &self,
-        scalar: ScalarExpr,
-        data_type: DataType,
-    ) -> Result<Box<(ScalarExpr, DataType)>> {
-        let ScalarExpr::FunctionCall(ref func) = scalar else {
-            return Ok(Box::new((scalar, data_type)));
-        };
-        if func.arguments.len() != 2 {
-            return Ok(Box::new((scalar, data_type)));
-        }
-        let arg0 = &func.arguments[0];
-        let arg1 = &func.arguments[1];
-        let (constant_arg_index, constant_arg) = match (arg0, arg1) {
-            (ScalarExpr::ConstantExpr(_), _)
-                if arg1.data_type().remove_nullable() == DataType::Variant
-                    && !arg1.used_columns().is_empty()
-                    && arg0.data_type().as_ref() == &DataType::String =>
-            {
-                (0, arg0)
-            }
-            (_, ScalarExpr::ConstantExpr(_))
-                if arg0.data_type().remove_nullable() == DataType::Variant
-                    && !arg0.used_columns().is_empty()
-                    && arg1.data_type().as_ref() == &DataType::String =>
-            {
-                (1, arg1)
-            }
-            _ => {
-                return Ok(Box::new((scalar, data_type)));
-            }
-        };
-
-        let wrap_new_arg = ScalarExpr::FunctionCall(FunctionCall {
-            span: func.span,
-            func_name: "to_variant".to_string(),
-            params: vec![],
-            arguments: vec![constant_arg.clone()],
-            return_type: Box::new(DataType::Variant),
-        });
-        let mut new_arguments = func.arguments.clone();
-        new_arguments[constant_arg_index] = wrap_new_arg;
-
-        let new_func = ScalarExpr::FunctionCall(FunctionCall {
-            span: func.span,
-            func_name: func.func_name.clone(),
-            params: func.params.clone(),
-            arguments: new_arguments,
-            return_type: Box::new(data_type.clone()),
-        });
-
-        Ok(Box::new((new_func, data_type)))
     }
 
     pub fn resolve_scalar_function_call(

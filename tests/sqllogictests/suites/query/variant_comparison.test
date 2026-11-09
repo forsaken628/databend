@@ -1,0 +1,59 @@
+# Variant equality with a string constant compares JSON values, not strings
+# produced by an implicit TRY_CAST of the Variant column.
+statement ok
+CREATE TABLE variant_comparison(id Int32, v Variant NULL)
+
+statement ok
+INSERT INTO variant_comparison VALUES
+    (1, parse_json('1')),
+    (2, to_variant('1')),
+    (3, parse_json('null')),
+    (4, parse_json('true')),
+    (5, parse_json('{}')),
+    (6, parse_json('[]')),
+    (7, NULL)
+
+query IBBBB
+SELECT id, v = '1', '1' = v, v <> '1', '1' <> v
+FROM variant_comparison ORDER BY id
+----
+1 0 0 1 1
+2 1 1 0 0
+3 0 0 1 1
+4 0 0 1 1
+5 0 0 1 1
+6 0 0 1 1
+7 NULL NULL NULL NULL
+
+# Folded string constants use the same equality policy.
+query I
+SELECT id FROM variant_comparison WHERE v = concat('', '1') ORDER BY id
+----
+2
+
+# A string constant is wrapped as a JSON string, not parsed as JSON text.
+statement ok
+INSERT INTO variant_comparison VALUES (8, to_variant('not JSON'))
+
+query I
+SELECT id FROM variant_comparison WHERE v = 'not JSON' ORDER BY id
+----
+8
+
+# User-written casts still request String comparison.
+query IBBB
+SELECT id, CAST(v AS String) = '1', TRY_CAST(v AS String) = '1',
+       '1' = TRY_CAST(v AS String)
+FROM variant_comparison WHERE id IN (1, 2) ORDER BY id
+----
+1 1 1 1
+2 1 1 1
+
+# Column-free comparisons retain their existing generic folding behavior.
+query B
+SELECT parse_json('1') = '1'
+----
+1
+
+statement ok
+DROP TABLE variant_comparison

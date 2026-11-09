@@ -76,6 +76,152 @@ async fn test_type_check_variant_rewrites() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_variant_comparison_preserves_json_types() -> Result<()> {
+    for nullable in [false, true] {
+        for operand in ["v", "get(v, 'a')"] {
+            for (operator, equal) in [("=", true), ("<>", false)] {
+                for sql in [
+                    format!("{operand} {operator} '1'"),
+                    format!("'1' {operator} {operand}"),
+                    format!("{operand} {operator} concat('', '1')"),
+                ] {
+                    let (scalar, data_type) = bind_variant_comparison(&sql, nullable)?;
+                    let checked = scalar.as_expr()?;
+                    assert_eq!(checked.data_type(), &data_type, "{sql}");
+                    let ScalarExpr::FunctionCall(call) = &scalar else {
+                        panic!("expected Variant comparison: {sql}")
+                    };
+                    assert!(
+                        call.arguments.iter().all(|arg| {
+                            arg.data_type().remove_nullable() == DataType::Variant
+                                && !matches!(arg, ScalarExpr::AutoCast(_))
+                        }),
+                        "semantic Variant coercions must not become AutoCast: {sql}"
+                    );
+                    assert!(
+                        call.arguments
+                            .iter()
+                            .any(|arg| matches!(arg, ScalarExpr::CastExpr(_)))
+                    );
+                    assert_eq!(data_type, DataType::Boolean.wrap_nullable(), "{sql}");
+                    for (json, matches) in [
+                        ("1", false),
+                        (r#""1""#, true),
+                        ("null", false),
+                        ("true", false),
+                        ("{}", false),
+                        ("[]", false),
+                    ] {
+                        let json = if operand == "v" {
+                            json.to_string()
+                        } else {
+                            format!(r#"{{"a":{json}}}"#)
+                        };
+                        let input =
+                            Scalar::Variant(jsonb::parse_value(json.as_bytes()).unwrap().to_vec());
+                        assert_eq!(
+                            eval_variant_comparison(&scalar, input)?,
+                            Scalar::Boolean(matches == equal),
+                            "{sql}, nullable={nullable}, input={json}"
+                        );
+                    }
+                    if nullable {
+                        assert_eq!(
+                            eval_variant_comparison(&scalar, Scalar::Null)?,
+                            Scalar::Null,
+                            "{sql}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // String constants are wrapped as JSON strings, not parsed as JSON text.
+    let (scalar, _) = bind_variant_comparison("v = 'not JSON'", true)?;
+    let input = Scalar::Variant(jsonb::parse_value(br#""not JSON""#).unwrap().to_vec());
+    assert_eq!(
+        eval_variant_comparison(&scalar, input)?,
+        Scalar::Boolean(true)
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_variant_comparison_keeps_explicit_and_generic_casts() -> Result<()> {
+    for sql in [
+        "CAST(v AS String) = '1'",
+        "TRY_CAST(v AS String) = '1'",
+        "'1' = TRY_CAST(v AS String)",
+        "v = CAST('1' AS String NULL)",
+        "v = text",
+    ] {
+        let (scalar, _) = bind_variant_comparison(sql, true)?;
+        let input = Scalar::Variant(jsonb::parse_value(b"1").unwrap().to_vec());
+        assert_eq!(
+            eval_variant_comparison(&scalar, input)?,
+            Scalar::Boolean(true),
+            "{sql}"
+        );
+        assert_eq!(
+            eval_variant_comparison(&scalar, Scalar::Null)?,
+            Scalar::Null,
+            "{sql}"
+        );
+    }
+    // Other comparisons and column-free folding retain their generic policy.
+    for sql in ["v > '0'", "parse_json('1') = '1'"] {
+        let (scalar, _) = bind_variant_comparison(sql, true)?;
+        let input = Scalar::Variant(jsonb::parse_value(b"1").unwrap().to_vec());
+        assert_eq!(
+            eval_variant_comparison(&scalar, input)?,
+            Scalar::Boolean(true),
+            "{sql}"
+        );
+    }
+    Ok(())
+}
+
+fn bind_variant_comparison(sql: &str, nullable: bool) -> Result<(ScalarExpr, DataType)> {
+    init_testing_globals();
+    let settings = Settings::create(Tenant::new_literal("default"));
+    let adapter = TestTypeCheckAdapter::new(settings);
+    let mut context = test_bind_context(ExprContext::Unknown);
+    context.add_column_binding(
+        ColumnBindingBuilder::new(
+            "v".to_string(),
+            Symbol::new(7),
+            Box::new(if nullable {
+                DataType::Variant.wrap_nullable()
+            } else {
+                DataType::Variant
+            }),
+            Visibility::Visible,
+        )
+        .build(),
+    );
+    resolve_type_check_sql(sql, adapter, &mut context)
+}
+
+fn eval_variant_comparison(scalar: &ScalarExpr, input: Scalar) -> Result<Scalar> {
+    use databend_common_expression::FoldRules;
+    use databend_common_functions::BUILTIN_FUNCTIONS;
+
+    let checked = scalar
+        .as_expr()?
+        .project_column_ref(|column| Ok(column.index))?;
+    let values = HashMap::from([
+        (Symbol::new(7), input),
+        (Symbol::new(1), Scalar::String("1".to_string())),
+    ]);
+    let checked = checked.fill_const_column(&values);
+    Ok(
+        FoldRules::eval_constant(&FunctionContext::default(), &BUILTIN_FUNCTIONS, &checked)
+            .expect("comparison with substituted inputs must evaluate"),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn nested_get_virtual_column_rewrite_skips_intermediate_paths() -> Result<()> {
     init_testing_globals();
     let settings = Settings::create(Tenant::new_literal("default"));
