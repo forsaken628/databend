@@ -326,6 +326,123 @@ impl<'a> ExprChecker<'a> {
         Err(ErrorCode::SemanticError(msg).set_span(span))
     }
 
+    /// Whether `contains(array(items), needle)` preserves the checked equalities.
+    ///
+    /// This is a proof for an optional rewrite, not another coercion policy. In
+    /// particular, accepting the `contains` signature alone says nothing about
+    /// the domain or casts selected by `eq`. Nullable elements are excluded:
+    /// membership's treatment of NULL is not SQL's three-valued IN semantics.
+    pub fn can_rewrite_in_list_to_contains<Index: ColumnIndex>(
+        &self,
+        span: Span,
+        func_ctx: &FunctionContext,
+        needle: &Expr<Index>,
+        items: &[Expr<Index>],
+    ) -> bool {
+        let equivalent = || -> Option<()> {
+            if !needle.is_deterministic(self.fn_registry) {
+                return None;
+            }
+            let array = self.check_function(span, "array", &[], items).ok()?;
+            let Expr::FunctionCall(array_call) = &array else {
+                return None;
+            };
+            let contains = self
+                .check_function(span, "contains", &[], &[array.clone(), needle.clone()])
+                .ok()?;
+            let Expr::FunctionCall(contains) = contains else {
+                return None;
+            };
+            let DataType::Array(element_type) = contains.args[0].data_type().remove_nullable_ref()
+            else {
+                return None;
+            };
+            // These contains overloads use the same primitive equality as eq.
+            // Do not assume this for generic/structured values or floating
+            // point hashing (NaN and signed zero), even if the types match.
+            match element_type.as_ref() {
+                DataType::Number(ty) if !ty.is_float() => {}
+                DataType::String | DataType::Boolean | DataType::Date | DataType::Timestamp => {}
+                _ => return None,
+            }
+
+            let mut array_arg = &contains.args[0];
+            let mut element_casts = Vec::new();
+            while let Expr::Cast(cast) = array_arg {
+                if cast.is_try {
+                    return None;
+                }
+                let DataType::Array(element_type) = cast.dest_type.remove_nullable_ref() else {
+                    return None;
+                };
+                element_casts.push(element_type.as_ref());
+                array_arg = &cast.expr;
+            }
+            if array_arg != &array {
+                return None;
+            }
+
+            for (item, array_item) in items.iter().zip(&array_call.args) {
+                if !matches!(item, Expr::Constant(_)) {
+                    return None;
+                }
+                let equality = self
+                    .check_function(span, "eq", &[], &[needle.clone(), item.clone()])
+                    .ok()?;
+                let Expr::FunctionCall(equality) = equality else {
+                    return None;
+                };
+                if equality.return_type != contains.return_type
+                    || equality.args[0] != contains.args[1]
+                {
+                    return None;
+                }
+                // Project the actual strict container casts onto this element;
+                // do not reselect an implicit TRY from its destination type.
+                let mut array_item = array_item.clone();
+                for dest_type in element_casts.iter().rev() {
+                    array_item = check_cast(
+                        array_item.span(),
+                        false,
+                        array_item,
+                        dest_type,
+                        self.fn_registry,
+                    )
+                    .ok()?;
+                }
+                // contains evaluates the entire array, while an OR of eq
+                // calls can short-circuit. Prove the constant conversion
+                // succeeds in this query's context before changing that order.
+                FoldRules::eval_constant(func_ctx, self.fn_registry, &array_item)?;
+                if equality.args[1] != array_item {
+                    // A nullable needle lifts the other eq operand to
+                    // Nullable(T), whereas the array stores non-NULL T. Only
+                    // this nullability lift may differ; the value conversion
+                    // (including strict versus TRY) must still be identical.
+                    let same_value = match (&equality.args[1], &array_item) {
+                        (Expr::Cast(lhs), Expr::Cast(rhs)) => {
+                            lhs.is_try == rhs.is_try
+                                && lhs.expr == rhs.expr
+                                && lhs.dest_type.remove_nullable_ref()
+                                    == rhs.dest_type.remove_nullable_ref()
+                        }
+                        (Expr::Cast(cast), argument) => {
+                            !cast.is_try
+                                && cast.expr.as_ref() == argument
+                                && cast.dest_type == argument.data_type().wrap_nullable()
+                        }
+                        _ => false,
+                    };
+                    if !same_value {
+                        return None;
+                    }
+                }
+            }
+            Some(())
+        };
+        equivalent().is_some()
+    }
+
     /// Variant equality wraps a String literal as a JSON string rather than
     /// parsing JSON text or converting the runtime Variant to String. Decide
     /// this before overload selection; the returned wrappers are executable

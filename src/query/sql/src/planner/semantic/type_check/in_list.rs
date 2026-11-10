@@ -20,6 +20,8 @@ use databend_common_expression::ColumnBuilder;
 use databend_common_expression::DataField;
 use databend_common_expression::DataSchemaRefExt;
 use databend_common_expression::Scalar;
+use databend_common_expression::type_check::CheckOptions;
+use databend_common_expression::type_check::ExprChecker;
 use databend_common_expression::type_check::common_super_type;
 use databend_common_expression::types::DataType;
 use databend_common_functions::BUILTIN_FUNCTIONS;
@@ -87,6 +89,7 @@ where A: super::TypeCheckAdapter
 
         let deref!((expr_scalar, _)) = self.resolve_core(arena, expr)?;
         let max_inlist_to_or = self.adapter.max_inlist_to_or()? as usize;
+        let mut resolved_items = None;
 
         if list.len() > max_inlist_to_or
             && list
@@ -94,25 +97,50 @@ where A: super::TypeCheckAdapter
                 .all(|item| satisfy_core_contain_func(arena, *item))
         {
             let (list_scalars, _) = self.resolve_expr_args(arena, list)?;
-            let deref!((array, _)) =
-                self.resolve_scalar_function_call(span, "array", vec![], list_scalars)?;
-            let deref!((array, _)) =
-                self.resolve_scalar_function_call(span, "array_distinct", vec![], vec![array])?;
-            let deref!((contains, data_type)) =
-                self.resolve_scalar_function_call(span, "contains", vec![], vec![
-                    array,
-                    expr_scalar,
-                ])?;
-            return if not {
-                self.resolve_scalar_function_call(span, "not", vec![], vec![contains])
-            } else {
-                Ok(Box::new((contains, data_type)))
-            };
+            let checker = ExprChecker::new(&BUILTIN_FUNCTIONS, CheckOptions::default());
+            let equivalent = expr_scalar.as_expr().ok().is_some_and(|needle| {
+                list_scalars
+                    .iter()
+                    .map(ScalarExpr::as_expr)
+                    .collect::<Result<Vec<_>>>()
+                    .ok()
+                    .is_some_and(|items| {
+                        checker.can_rewrite_in_list_to_contains(
+                            span,
+                            &self.func_ctx,
+                            &needle,
+                            &items,
+                        )
+                    })
+            });
+            if equivalent {
+                let deref!((array, _)) =
+                    self.resolve_scalar_function_call(span, "array", vec![], list_scalars)?;
+                let deref!((array, _)) =
+                    self.resolve_scalar_function_call(span, "array_distinct", vec![], vec![array])?;
+                let deref!((contains, data_type)) =
+                    self.resolve_scalar_function_call(span, "contains", vec![], vec![
+                        array,
+                        expr_scalar,
+                    ])?;
+                return if not {
+                    self.resolve_scalar_function_call(span, "not", vec![], vec![contains])
+                } else {
+                    Ok(Box::new((contains, data_type)))
+                };
+            }
+            resolved_items = Some(list_scalars.into_iter());
         }
 
         let mut predicate_levels = Vec::with_capacity(list.len().max(1).ilog2() as usize + 1);
         for item in list {
-            let deref!((item, _)) = self.resolve_core(arena, *item)?;
+            let item = match &mut resolved_items {
+                Some(items) => items.next().unwrap(),
+                None => {
+                    let deref!((scalar, _)) = self.resolve_core(arena, *item)?;
+                    scalar
+                }
+            };
             let deref!((predicate, _)) =
                 self.resolve_scalar_function_call(span, "eq", vec![], vec![
                     expr_scalar.clone(),

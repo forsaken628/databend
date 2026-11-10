@@ -1,6 +1,117 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_in_list_coercions_are_independent_of_contains_threshold() -> Result<()> {
+    use databend_common_expression::DataBlock;
+    use databend_common_expression::Evaluator;
+    use databend_common_functions::BUILTIN_FUNCTIONS;
+
+    init_testing_globals();
+    for (data_type, value, item, expected) in [
+        (
+            DataType::Variant,
+            Scalar::Variant(jsonb::parse_value(b"1").unwrap().to_vec()),
+            "'1'",
+            Scalar::Boolean(false),
+        ),
+        (
+            DataType::Variant,
+            Scalar::Variant(jsonb::parse_value(br#""1""#).unwrap().to_vec()),
+            "'1'",
+            Scalar::Boolean(true),
+        ),
+        (
+            DataType::Variant.wrap_nullable(),
+            Scalar::Null,
+            "'1'",
+            Scalar::Null,
+        ),
+        (
+            DataType::Number(NumberDataType::UInt64),
+            Scalar::from(1_u64),
+            "NULL",
+            Scalar::Null,
+        ),
+        (
+            DataType::Number(NumberDataType::UInt64),
+            Scalar::from(1_u64),
+            "1",
+            Scalar::Boolean(true),
+        ),
+    ] {
+        for not in [false, true] {
+            for count in [1, 4, 16] {
+                let settings = Settings::create(Tenant::new_literal("default"));
+                let mut context = test_bind_context(ExprContext::Unknown);
+                context.add_column_binding(
+                    ColumnBindingBuilder::new(
+                        "x".into(),
+                        Symbol::new(7),
+                        Box::new(data_type.clone()),
+                        Visibility::Visible,
+                    )
+                    .build(),
+                );
+                let items = vec![item; count].join(",");
+                let sql = format!("x {}IN ({items})", if not { "NOT " } else { "" });
+                let (scalar, declared) = resolve_type_check_sql(
+                    &sql,
+                    TestTypeCheckAdapter::new(settings),
+                    &mut context,
+                )?;
+                let expr = scalar.as_expr()?.project_column_ref(|_| Ok(0usize))?;
+                assert_eq!(expr.data_type(), &declared, "{sql}");
+                let expr = expr.fill_const_column(&HashMap::from([(0, value.clone())]));
+                let block = DataBlock::empty_with_rows(1);
+                let func_ctx = FunctionContext::default();
+                let result = Evaluator::new(&block, &func_ctx, &BUILTIN_FUNCTIONS)
+                    .run(&expr)?
+                    .into_scalar()
+                    .unwrap();
+                let expected = match &expected {
+                    Scalar::Boolean(v) if not => Scalar::Boolean(!v),
+                    value => value.clone(),
+                };
+                assert_eq!(result, expected, "{sql}, {data_type}");
+            }
+        }
+    }
+    // Invalid strict conversions must remain errors with either rewrite
+    // threshold. Do not silently replace them with TRY or fold them away.
+    for threshold in ["0", "64"] {
+        let settings = Settings::create(Tenant::new_literal("default"));
+        settings.set_setting("max_inlist_to_or".into(), threshold.into())?;
+        let mut context = test_bind_context(ExprContext::Unknown);
+        context.add_column_binding(
+            ColumnBindingBuilder::new(
+                "d".into(),
+                Symbol::new(7),
+                Box::new(DataType::Date),
+                Visibility::Visible,
+            )
+            .build(),
+        );
+        let (scalar, _) = resolve_type_check_sql(
+            "d IN ('1970-01-01','bad date','bad date','bad date')",
+            TestTypeCheckAdapter::new(settings),
+            &mut context,
+        )?;
+        let expr = scalar
+            .as_expr()?
+            .project_column_ref(|_| Ok(0usize))?
+            .fill_const_column(&HashMap::from([(0, Scalar::Date(0))]));
+        let block = DataBlock::empty_with_rows(1);
+        let func_ctx = FunctionContext::default();
+        assert!(
+            Evaluator::new(&block, &func_ctx, &BUILTIN_FUNCTIONS)
+                .run(&expr)
+                .is_err()
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_type_check_in_list_rewrites() -> Result<()> {
     let cases = [
         SqlTestCase {

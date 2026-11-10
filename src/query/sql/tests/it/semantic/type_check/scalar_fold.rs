@@ -2,6 +2,90 @@ use databend_common_expression::TableDataType;
 
 use super::*;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_if_pruning_keeps_checked_coercions() -> Result<()> {
+    use databend_common_expression::DataBlock;
+    use databend_common_expression::Evaluator;
+    use databend_common_functions::BUILTIN_FUNCTIONS;
+
+    init_testing_globals();
+    for nullable in [false, true] {
+        for sql in [
+            "CASE WHEN false THEN i WHEN c THEN v ELSE v END",
+            "if(false, i, c, v, v)",
+            "if(true,v,i)",
+            "if(c,v,i)",
+            "CASE WHEN false THEN i WHEN c THEN CAST(v AS Int64) ELSE TRY_CAST(v AS Int64) END",
+        ] {
+            let settings = Settings::create(Tenant::new_literal("default"));
+            let mut context = test_bind_context(ExprContext::Unknown);
+            for (id, name, ty) in [
+                (
+                    7,
+                    "v",
+                    if nullable {
+                        DataType::Variant.wrap_nullable()
+                    } else {
+                        DataType::Variant
+                    },
+                ),
+                (
+                    8,
+                    "i",
+                    DataType::Number(NumberDataType::Int64).wrap_nullable(),
+                ),
+                (9, "c", DataType::Boolean),
+            ] {
+                context.add_column_binding(
+                    ColumnBindingBuilder::new(
+                        name.into(),
+                        Symbol::new(id),
+                        Box::new(ty),
+                        Visibility::Visible,
+                    )
+                    .build(),
+                );
+            }
+            let (scalar, declared) =
+                resolve_type_check_sql(sql, TestTypeCheckAdapter::new(settings), &mut context)?;
+            let expr = scalar
+                .as_expr()?
+                .project_column_ref(|col| Ok(col.index.as_usize() - 7))?;
+            assert_eq!(
+                declared,
+                DataType::Number(NumberDataType::Int64).wrap_nullable(),
+                "{sql}"
+            );
+            assert_eq!(expr.data_type(), &declared);
+            for condition in [false, true] {
+                let input = Scalar::Variant(jsonb::parse_value(br#""bad""#).unwrap().to_vec());
+                let expr = expr.fill_const_column(&HashMap::from([
+                    (0, input),
+                    (1, Scalar::from(0_i64)),
+                    (2, Scalar::Boolean(condition)),
+                ]));
+                let block = DataBlock::empty_with_rows(1);
+                let func_ctx = FunctionContext::default();
+                let result = Evaluator::new(&block, &func_ctx, &BUILTIN_FUNCTIONS).run(&expr);
+                if sql.contains("CAST(v AS Int64) ELSE") && condition {
+                    assert!(
+                        result.is_err(),
+                        "an explicit strict cast must still fail: {sql}"
+                    );
+                } else {
+                    let expected = if sql == "if(c,v,i)" && !condition {
+                        Scalar::from(0_i64)
+                    } else {
+                        Scalar::Null
+                    };
+                    assert_eq!(result?.into_scalar().unwrap(), expected, "{sql}");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 const fn case(name: &'static str, description: &'static str, sql: &'static str) -> SqlTestCase {
     SqlTestCase {
         name,

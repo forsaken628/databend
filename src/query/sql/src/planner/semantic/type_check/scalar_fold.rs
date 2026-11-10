@@ -691,29 +691,33 @@ where A: TypeCheckAdapter
                         return Ok(self.select_branch(&call, args, &arg_facts, index));
                     }
                     IfPruning::Keep(indices) => {
-                        // Check the shorter call first, so that the arguments
-                        // are moved only when it binds.
-                        let raw = RawExpr::FunctionCall {
+                        // Prune checked arguments, not the original children:
+                        // rebinding those can select a different domain and
+                        // replace an original TRY_CAST with a strict CAST.
+                        let checked_args = indices
+                            .iter()
+                            .map(|&index| call.args[index].clone())
+                            .collect::<Vec<_>>();
+                        if let Ok(EExpr::FunctionCall(shorter)) = type_check::check_function(
                             span,
-                            name: func_name.to_string(),
-                            params: params.clone(),
-                            args: indices
-                                .iter()
-                                .enumerate()
-                                .map(|(index, &arg)| {
-                                    Self::placeholder(index, &args[arg].scalar, &args[arg].facts)
-                                })
-                                .collect(),
-                        };
-                        if type_check::check(&raw, &BUILTIN_FUNCTIONS).is_ok() {
+                            func_name,
+                            &params,
+                            &checked_args,
+                            &BUILTIN_FUNCTIONS,
+                        ) && shorter.return_type == call.return_type
+                        {
                             let mut args = args.into_iter().map(Some).collect::<Vec<_>>();
                             let kept = indices
                                 .iter()
-                                .map(|&index| args[index].take().unwrap())
+                                .zip(checked_args)
+                                .map(|(&index, checked)| {
+                                    self.materialize_bound_argument(
+                                        args[index].take().unwrap(),
+                                        checked,
+                                    )
+                                })
                                 .collect();
-                            let result =
-                                self.resolve_bound_function_call(span, func_name, params, kept)?;
-                            return Ok(self.with_call_type(span, false, result, &call.return_type));
+                            return self.fold_bound_call(span, func_name, params, shorter, kept);
                         }
                     }
                 }
@@ -849,6 +853,26 @@ where A: TypeCheckAdapter
         })
     }
 
+    /// Keep the checked operation and its facts when a rewrite retains a child.
+    fn materialize_bound_argument(
+        &self,
+        argument: BoundScalar,
+        checked: EExpr<usize>,
+    ) -> BoundScalar {
+        let facts = self.arg_facts(&checked, &argument.scalar, &argument.facts);
+        BoundScalar {
+            data_type: checked.data_type().clone(),
+            facts: ScalarFacts {
+                domain: facts.domain,
+                removable: facts.removable,
+                deterministic: facts.deterministic,
+                column_free: argument.facts.column_free,
+                evaluable: argument.facts.evaluable,
+            },
+            scalar: Self::materialize_checked_argument(argument.scalar, checked),
+        }
+    }
+
     /// Attach the coercions selected by ExprChecker to the original bound
     /// child. Stop at its type boundary so that placeholders never replace
     /// the child itself. Variant conversions and TRY_CAST carry fixed value
@@ -906,9 +930,17 @@ where A: TypeCheckAdapter
         if let Some(value) = &arg_facts[index].constant {
             return Self::folded_constant(checked.span(), value.clone());
         }
-        let is_try = matches!(checked, EExpr::Cast(cast) if cast.is_try);
         let branch = args.into_iter().nth(index).unwrap();
-        self.with_call_type(checked.span(), is_try, branch, &call.return_type)
+        // A selected branch is the complete scalar. Keep its checked root
+        // cast explicit, as before, while also retaining any inner wrappers.
+        let branch = match checked {
+            EExpr::Cast(cast) => {
+                let branch = self.materialize_bound_argument(branch, *cast.expr.clone());
+                self.bound_cast(cast.span, cast.is_try, branch, cast.dest_type.clone())
+            }
+            _ => self.materialize_bound_argument(branch, checked.clone()),
+        };
+        self.with_call_type(checked.span(), false, branch, &call.return_type)
     }
 
     /// Keeps the type of a call whose result was simplified to `result`.

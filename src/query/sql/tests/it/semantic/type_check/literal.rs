@@ -1,6 +1,70 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_constant_arrays_use_checked_coercions() -> Result<()> {
+    init_testing_globals();
+    for arguments in [
+        "parse_json('\"bad\"'), CAST(1 AS Int64 NULL)",
+        "parse_json('1'), CAST(2 AS Int64 NULL)",
+        "parse_json('null'), CAST(1 AS Int64 NULL)",
+        "TRY_CAST('bad' AS Int64), CAST(1 AS Int64 NULL)",
+        "CAST('1' AS Int64), CAST(2 AS Int64 NULL)",
+        "1, 256, -1, NULL",
+    ] {
+        let mut results = Vec::new();
+        for sql in [format!("[{arguments}]"), format!("array({arguments})")] {
+            let settings = Settings::create(Tenant::new_literal("default"));
+            let mut context = test_bind_context(ExprContext::Unknown);
+            let (scalar, declared) =
+                resolve_type_check_sql(&sql, TestTypeCheckAdapter::new(settings), &mut context)?;
+            assert_eq!(scalar.data_type().as_ref(), &declared, "{sql}");
+            let expr = scalar.as_expr()?;
+            let value = databend_common_expression::FoldRules::eval_constant(
+                &FunctionContext::default(),
+                &databend_common_functions::BUILTIN_FUNCTIONS,
+                &expr,
+            )
+            .unwrap();
+            results.push((declared, value));
+        }
+        assert_eq!(results[0], results[1], "{arguments}");
+    }
+    // Keep the constant builder even above the ordinary function-fold limit.
+    let settings = Settings::create(Tenant::new_literal("default"));
+    let mut context = test_bind_context(ExprContext::Unknown);
+    let sql = format!("[{}]", vec!["1"; 4097].join(","));
+    let (scalar, _) =
+        resolve_type_check_sql(&sql, TestTypeCheckAdapter::new(settings), &mut context)?;
+    let ScalarExpr::ConstantExpr(constant) = scalar else {
+        panic!("large literal arrays must remain constants")
+    };
+    let Scalar::Array(values) = constant.value else {
+        panic!("expected an array")
+    };
+    assert_eq!(values.len(), 4097);
+    // The common checker must not turn explicit strict errors into TRY NULL.
+    let settings = Settings::create(Tenant::new_literal("default"));
+    let mut context = test_bind_context(ExprContext::Unknown);
+    let (scalar, _) = resolve_type_check_sql(
+        "[CAST('bad' AS Int64), 1]",
+        TestTypeCheckAdapter::new(settings),
+        &mut context,
+    )?;
+    let block = databend_common_expression::DataBlock::empty_with_rows(1);
+    let func_ctx = FunctionContext::default();
+    assert!(
+        databend_common_expression::Evaluator::new(
+            &block,
+            &func_ctx,
+            &databend_common_functions::BUILTIN_FUNCTIONS,
+        )
+        .run(&scalar.as_expr()?.project_column_ref(|_| Ok(0usize))?)
+        .is_err()
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_type_check_literal() -> Result<()> {
     let cases = [
         SqlTestCase {

@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use databend_common_ast::Span;
 use databend_common_ast::ast::Expr;
 use databend_common_ast::ast::Literal;
 use databend_common_exception::Result;
 use databend_common_expression::ColumnBuilder;
+use databend_common_expression::Constant;
+use databend_common_expression::DataBlock;
+use databend_common_expression::Evaluator;
+use databend_common_expression::Expr as CheckedExpr;
 use databend_common_expression::Scalar;
-use databend_common_expression::cast_scalar;
 use databend_common_expression::shrink_scalar;
-use databend_common_expression::type_check::common_super_type;
+use databend_common_expression::type_check;
 use databend_common_expression::types::DataType;
 use databend_common_expression::types::NumberScalar;
 use databend_common_expression::types::decimal::DecimalScalar;
@@ -81,63 +82,55 @@ where A: super::TypeCheckAdapter
         span: Span,
         arguments: Vec<(ScalarExpr, DataType)>,
     ) -> Result<Box<(ScalarExpr, DataType)>> {
-        let mut elems = Vec::with_capacity(arguments.len());
-        let mut constant_values: Option<Vec<(Scalar, DataType)>> =
-            Some(Vec::with_capacity(arguments.len()));
-        let mut element_type: Option<DataType> = None;
-        let mut data_type_set = HashSet::with_capacity(2);
-
-        for (arg, data_type) in arguments {
-            if let Some(values) = constant_values.as_mut() {
-                let maybe_constant = match &arg {
-                    ScalarExpr::ConstantExpr(constant) => Some(constant.value.clone()),
-                    ScalarExpr::TypedConstantExpr(constant, _) => Some(constant.value.clone()),
-                    _ => None,
+        let constants = arguments
+            .iter()
+            .map(|(argument, data_type)| {
+                let (ScalarExpr::ConstantExpr(constant)
+                | ScalarExpr::TypedConstantExpr(constant, _)) = argument
+                else {
+                    return None;
                 };
-                if let Some(value) = maybe_constant {
-                    if data_type_set.contains(&data_type) {
-                        elems.push(arg);
-                        values.push((value, data_type));
-                        continue;
-                    }
-                    element_type = if let Some(current_ty) = element_type.clone() {
-                        common_super_type(
-                            current_ty.clone(),
-                            data_type.clone(),
-                            &BUILTIN_FUNCTIONS.default_cast_rules,
-                        )
-                    } else {
-                        Some(data_type.clone())
-                    };
+                Some(CheckedExpr::<usize>::Constant(Constant {
+                    span: constant.span,
+                    scalar: constant.value.clone(),
+                    data_type: data_type.clone(),
+                }))
+            })
+            .collect::<Option<Vec<_>>>();
 
-                    if element_type.is_some() {
-                        data_type_set.insert(data_type.clone());
-                        values.push((value, data_type));
-                    } else {
-                        constant_values = None;
-                        element_type = None;
-                    }
-                } else {
-                    constant_values = None;
-                    element_type = None;
-                }
-            }
-            elems.push(arg);
+        if let Some(constants) = constants
+            && !constants.is_empty()
+        {
+            // Retain the efficient constant-array builder, but let the checker
+            // choose both the common type and each element's cast operation.
+            // A destination type alone cannot distinguish strict from TRY.
+            let checked =
+                type_check::check_function(span, "array", &[], &constants, &BUILTIN_FUNCTIONS)?;
+            let CheckedExpr::FunctionCall(call) = checked else {
+                unreachable!("a nonempty array is a checked function call")
+            };
+            let DataType::Array(element_type) = call.return_type else {
+                unreachable!("a nonempty array has an Array return type")
+            };
+            let block = DataBlock::empty();
+            let evaluator = Evaluator::new(&block, &self.func_ctx, &BUILTIN_FUNCTIONS);
+            let casted = call
+                .args
+                .into_iter()
+                .map(|argument| match argument {
+                    CheckedExpr::Constant(constant) => Ok(constant.scalar),
+                    argument => Ok(evaluator.run(&argument)?.into_scalar().unwrap()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(Self::build_constant_array(span, *element_type, casted));
         }
 
-        if let (Some(values), Some(element_ty)) = (constant_values, element_type) {
-            let mut casted = Vec::with_capacity(values.len());
-            for (value, ty) in values {
-                if ty == element_ty {
-                    casted.push(value);
-                } else {
-                    casted.push(cast_scalar(span, value, &element_ty, &BUILTIN_FUNCTIONS)?);
-                }
-            }
-            return Ok(Self::build_constant_array(span, element_ty, casted));
-        }
-
-        self.resolve_scalar_function_call(span, "array", vec![], elems)
+        self.resolve_scalar_function_call(
+            span,
+            "array",
+            vec![],
+            arguments.into_iter().map(|(scalar, _)| scalar).collect(),
+        )
     }
 
     fn build_constant_array(

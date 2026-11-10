@@ -55,5 +55,42 @@ SELECT parse_json('1') = '1'
 ----
 1
 
+# Adding duplicate IN-list values must not select another comparison domain.
+query IBBBB
+SELECT id, v IN ('1'), v IN ('1','1','1','1'),
+       v NOT IN ('1'), v NOT IN ('1','1','1','1')
+FROM variant_comparison WHERE id <= 7 ORDER BY id
+----
+1 0 0 1 1
+2 1 1 0 0
+3 0 0 1 1
+4 0 0 1 1
+5 0 0 1 1
+6 0 0 1 1
+7 NULL NULL NULL NULL
+
+# Array literals and array() must apply the same checked TRY coercion.
+query BI
+SELECT [parse_json('"bad"'), CAST(1 AS Int64 NULL)][1] IS NULL,
+       [parse_json('"bad"'), CAST(1 AS Int64 NULL)][2]
+----
+1 1
+
+# Pruning a dead CASE branch must not turn implicit TRY into strict CAST.
+statement ok
+CREATE TABLE variant_case_coercion(v Variant NULL, i Int64 NULL, c Boolean NOT NULL)
+
+statement ok
+INSERT INTO variant_case_coercion VALUES (parse_json('"bad"'), 0, true)
+
+query II
+SELECT CASE WHEN false THEN i WHEN c THEN v ELSE v END, if(c,v,i)
+FROM variant_case_coercion
+----
+NULL NULL
+
+statement ok
+DROP TABLE variant_case_coercion
+
 statement ok
 DROP TABLE variant_comparison
