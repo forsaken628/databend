@@ -78,6 +78,54 @@ optimized: noteq(delta (#3), 1)
 lowered: delta (#3) <> 1
 type: Boolean NULL
 
+=== integer_equality ===
+sql: delta = 1::Int64
+bound: eq(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: eq(delta (#3), 1)
+lowered: delta (#3) = 1
+type: Boolean NULL
+
+=== integer_equality_constant_on_left ===
+sql: 1::Int64 = delta
+bound: eq(CAST(delta (#3) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: eq(delta (#3), 1)
+lowered: delta (#3) = 1
+type: Boolean NULL
+
+=== nullable_equality_constant ===
+sql: assume_not_null(delta) = CAST(1 AS INT NULL)
+bound: eq(CAST(assume_not_null(delta (#3)) AS Int32 NULL), 1)
+bound_type: Boolean NULL
+optimized: eq(CAST(assume_not_null(delta (#3)) AS Int32 NULL), 1)
+lowered: CAST(assume_not_null(delta (#3)) AS Int32 NULL) = 1
+type: Boolean NULL
+
+=== nullable_equality_constant_on_left ===
+sql: CAST(1 AS INT NULL) = assume_not_null(delta)
+bound: eq(1, CAST(assume_not_null(delta (#3)) AS Int32 NULL))
+bound_type: Boolean NULL
+optimized: eq(1, CAST(assume_not_null(delta (#3)) AS Int32 NULL))
+lowered: 1 = CAST(assume_not_null(delta (#3)) AS Int32 NULL)
+type: Boolean NULL
+
+=== null_equality_constant ===
+sql: delta = CAST(NULL AS INT NULL)
+bound: NULL
+bound_type: NULL
+optimized: NULL
+lowered: NULL
+type: NULL
+
+=== integer_equality_out_of_range ===
+sql: delta = 9223372036854775807::Int64
+bound: eq(CAST(delta (#3) AS Int64 NULL), CAST(9223372036854775807 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: eq(CAST(delta (#3) AS Int64 NULL), 9223372036854775807)
+lowered: CAST(delta (#3) AS Int64 NULL) = 9223372036854775807
+type: Boolean NULL
+
 === nonnullable_runtime_expression ===
 sql: assume_not_null(delta) > 1::Int64
 bound: gt(CAST(assume_not_null(delta (#3)) AS Int64), 1)
@@ -112,10 +160,42 @@ type: Boolean NULL
 
 === unsigned_integer_equality ===
 sql: wide = 1::Int64
-bound: eq(wide (#7), CAST(1 AS UInt64 NULL))
+bound: eq(CAST(wide (#7) AS Int64 NULL), CAST(1 AS Int64 NULL))
 bound_type: Boolean NULL
 optimized: eq(wide (#7), 1)
-lowered: wide (#7) = CAST(1 AS UInt64 NULL)
+lowered: wide (#7) = 1
+type: Boolean NULL
+
+=== unsigned_integer_equality_constant_on_left ===
+sql: 1::Int64 = wide
+bound: eq(CAST(wide (#7) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: eq(wide (#7), 1)
+lowered: wide (#7) = 1
+type: Boolean NULL
+
+=== unsigned_nullable_equality_constant ===
+sql: assume_not_null(wide) = CAST(1 AS INT64 NULL)
+bound: eq(CAST(assume_not_null(wide (#7)) AS Int64 NULL), 1)
+bound_type: Boolean NULL
+optimized: eq(CAST(assume_not_null(wide (#7)) AS UInt64 NULL), 1)
+lowered: CAST(assume_not_null(wide (#7)) AS UInt64 NULL) = 1
+type: Boolean NULL
+
+=== unsigned_negative_literal ===
+sql: wide = -1::Int64
+bound: eq(CAST(wide (#7) AS Int64 NULL), CAST(-1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: eq(CAST(wide (#7) AS Int64 NULL), -1)
+lowered: CAST(wide (#7) AS Int64 NULL) = -1
+type: Boolean NULL
+
+=== explicit_unsigned_conversion ===
+sql: CAST(wide AS Int64) = 1::Int64
+bound: eq(CAST(wide (#7) AS Int64 NULL), CAST(1 AS Int64 NULL))
+bound_type: Boolean NULL
+optimized: eq(CAST(wide (#7) AS Int64 NULL), 1)
+lowered: CAST(wide (#7) AS Int64 NULL) = 1
 type: Boolean NULL
 
 === string_column_integer_literal ===

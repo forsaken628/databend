@@ -50,6 +50,8 @@ use databend_common_sql::plans::CastExpr;
 use databend_common_sql::plans::ComparisonOp;
 use databend_common_sql::plans::ConstantExpr;
 use databend_common_sql::plans::FunctionCall;
+use databend_common_sql::plans::Plan;
+use databend_common_sql::plans::RelOperator;
 use databend_common_statistics::Datum;
 use databend_common_statistics::F64;
 use databend_common_statistics::Histogram;
@@ -62,7 +64,9 @@ use databend_storages_common_table_meta::meta::ColumnCountMinSketch;
 use databend_storages_common_table_meta::meta::ColumnTopN;
 use databend_storages_common_table_meta::meta::ColumnTopNEntry;
 
+use crate::framework::golden::SqlTestCase;
 use crate::framework::golden::open_golden_file;
+use crate::framework::golden::setup_context;
 use crate::framework::golden::write_case_title;
 
 #[derive(Default)]
@@ -737,8 +741,8 @@ fn test_selectivity_comparison_outcomes() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_selectivity_typed_comparison_outcomes() -> Result<()> {
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_selectivity_typed_comparison_outcomes() -> Result<()> {
     let mut file = open_golden_file("optimizer", "selectivity_typed_comparison.txt")?;
     write_case_title(
         &mut file,
@@ -807,35 +811,26 @@ fn test_selectivity_typed_comparison_outcomes() -> Result<()> {
         &[("number", DataType::Number(NumberDataType::Int32))],
         number_stats.clone(),
     )?;
-    let typed_number_predicate = ScalarExpr::FunctionCall(FunctionCall {
-        span: None,
-        func_name: ComparisonOp::Equal.to_func_name().to_string(),
-        params: vec![],
-        arguments: vec![
-            ScalarExpr::BoundColumnRef(BoundColumnRef {
-                span: None,
-                column: ColumnBindingBuilder::new(
-                    "number".to_string(),
-                    Symbol::new(0),
-                    Box::new(DataType::Number(NumberDataType::Int32)),
-                    Visibility::Visible,
-                )
-                .build(),
-            }),
-            ScalarExpr::TypedConstantExpr(
-                ConstantExpr {
-                    span: None,
-                    value: Scalar::Number(NumberScalar::UInt64(5)),
-                },
-                DataType::Number(NumberDataType::UInt64),
-            ),
-        ],
-        return_type: Box::new(DataType::Boolean),
-    });
+    // Integer literal narrowing is a post-bind scalar rule, not part of
+    // ExprChecker. Use a real bound predicate rather than relying on lowering
+    // a hand-built call to perform that optimization for the estimator.
+    let case = SqlTestCase {
+        name: "typed_integer_equality_selectivity",
+        description: "",
+        setup_sqls: &["CREATE TABLE selectivity_t(number Int32 NOT NULL)"],
+        sql: "SELECT number = CAST(5 AS UInt64) FROM selectivity_t",
+    };
+    let ctx = setup_context(&case).await?;
+    let Plan::Query { s_expr, .. } = ctx.bind_sql(case.sql).await? else {
+        panic!("expected query");
+    };
+    let RelOperator::EvalScalar(projection) = s_expr.logical()?.plan() else {
+        panic!("expected projection");
+    };
     run_scalar_case_with_predicates(
         &mut file,
         &["number = UInt64(5)"],
-        &[typed_number_predicate],
+        std::slice::from_ref(&projection.items[0].scalar),
         number_stats.clone(),
         StatCardinality::estimate(100.0),
         CaseOptions::default(),

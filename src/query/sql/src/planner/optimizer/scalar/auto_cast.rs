@@ -48,7 +48,18 @@ pub(super) fn move_cast_to_constant(call: &mut FunctionCall, func_ctx: &Function
         ) || !matches!(
             cast.target_type.remove_nullable(),
             DataType::Number(_) | DataType::Decimal(_)
-        ) || !classify_conversion(&source_type, &cast.target_type).is_lossless_injective()
+        ) {
+            continue;
+        }
+        // Integer equality used to narrow its literal before overload resolution.
+        // Do that here instead: moving an integer AutoCast may also avoid an
+        // overflow introduced by that overload (e.g. UInt64 -> Int64). Keep
+        // explicit casts and comparisons through non-injective floats unchanged.
+        let integer_equality = call.func_name == "eq"
+            && source_type.remove_nullable().is_integer()
+            && cast.target_type.remove_nullable().is_integer();
+        if !integer_equality
+            && !classify_conversion(&source_type, &cast.target_type).is_lossless_injective()
         {
             continue;
         }
@@ -58,6 +69,14 @@ pub(super) fn move_cast_to_constant(call: &mut FunctionCall, func_ctx: &Function
             continue;
         };
         if other.data_type().as_ref() != cast.target_type.as_ref() {
+            continue;
+        }
+        let narrowed_type = if cast.target_type.is_nullable() {
+            source_type.wrap_nullable()
+        } else {
+            source_type.clone().into_owned()
+        };
+        if narrowed_type == *cast.target_type {
             continue;
         }
         let original: Expr<usize> = Constant {
@@ -70,7 +89,7 @@ pub(super) fn move_cast_to_constant(call: &mut FunctionCall, func_ctx: &Function
             other.span(),
             false,
             original,
-            &source_type,
+            &narrowed_type,
             &BUILTIN_FUNCTIONS,
         )
         .ok()
@@ -80,7 +99,7 @@ pub(super) fn move_cast_to_constant(call: &mut FunctionCall, func_ctx: &Function
         let narrowed: Expr<usize> = Constant {
             span: other.span(),
             scalar: converted.clone(),
-            data_type: source_type.clone().into_owned(),
+            data_type: narrowed_type.clone(),
         }
         .into();
         let round_trip = type_check::check_cast(
@@ -107,7 +126,7 @@ pub(super) fn move_cast_to_constant(call: &mut FunctionCall, func_ctx: &Function
                 .map(|id| RawExpr::ColumnRef {
                     span: None,
                     id,
-                    data_type: source_type.clone().into_owned(),
+                    data_type: narrowed_type.clone(),
                     display_name: id.to_string(),
                 })
                 .collect(),
@@ -121,11 +140,18 @@ pub(super) fn move_cast_to_constant(call: &mut FunctionCall, func_ctx: &Function
         if checked.data_type() != call.return_type.as_ref() {
             continue;
         }
-        let replacement = super::constant(other.span(), converted, source_type.into_owned());
-        let ScalarExpr::AutoCast(cast) = call.arguments.remove(runtime) else {
+        let replacement = super::constant(other.span(), converted, narrowed_type.clone());
+        let ScalarExpr::AutoCast(mut cast) = call.arguments.remove(runtime) else {
             unreachable!()
         };
-        call.arguments.insert(runtime, *cast.argument);
+        let input = if cast.argument.data_type().as_ref() == &narrowed_type {
+            *cast.argument
+        } else {
+            // Keep only the nullable lift required by the checked result type.
+            cast.target_type = Box::new(narrowed_type);
+            ScalarExpr::AutoCast(cast)
+        };
+        call.arguments.insert(runtime, input);
         call.arguments[1 - runtime] = replacement;
         return;
     }

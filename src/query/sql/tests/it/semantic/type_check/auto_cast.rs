@@ -61,6 +61,21 @@ async fn test_auto_cast_expression_rules() -> Result<()> {
         ("less_or_equal", "delta <= 1::Int64"),
         ("greater_or_equal", "delta >= 1::Int64"),
         ("not_equal", "delta <> 1::Int64"),
+        ("integer_equality", "delta = 1::Int64"),
+        ("integer_equality_constant_on_left", "1::Int64 = delta"),
+        (
+            "nullable_equality_constant",
+            "assume_not_null(delta) = CAST(1 AS INT NULL)",
+        ),
+        (
+            "nullable_equality_constant_on_left",
+            "CAST(1 AS INT NULL) = assume_not_null(delta)",
+        ),
+        ("null_equality_constant", "delta = CAST(NULL AS INT NULL)"),
+        (
+            "integer_equality_out_of_range",
+            "delta = 9223372036854775807::Int64",
+        ),
         (
             "nonnullable_runtime_expression",
             "assume_not_null(delta) > 1::Int64",
@@ -72,6 +87,19 @@ async fn test_auto_cast_expression_rules() -> Result<()> {
             "if(flag, delta, 1::Int64) > 2::Int64",
         ),
         ("unsigned_integer_equality", "wide = 1::Int64"),
+        (
+            "unsigned_integer_equality_constant_on_left",
+            "1::Int64 = wide",
+        ),
+        (
+            "unsigned_nullable_equality_constant",
+            "assume_not_null(wide) = CAST(1 AS INT64 NULL)",
+        ),
+        ("unsigned_negative_literal", "wide = -1::Int64"),
+        (
+            "explicit_unsigned_conversion",
+            "CAST(wide AS Int64) = 1::Int64",
+        ),
         ("string_column_integer_literal", "text > 1"),
         ("nested_comparison", "if(text > 1, number, 0)"),
         ("multiple_rewrite_sites", "text > 1 AND pattern < 2"),
@@ -111,6 +139,12 @@ async fn test_auto_cast_expression_rules() -> Result<()> {
         let mut checker =
             TypeChecker::try_create_with_adapter(&mut context, adapter, &names, metadata, &[])?;
         let (bound, bound_type) = *checker.resolve(&ast)?;
+        if let ScalarExpr::FunctionCall(call) = &bound {
+            assert_eq!(call.infer_return_type()?, *call.return_type, "{sql}");
+        }
+        if name.starts_with("nullable_equality_constant") {
+            assert_eq!(bound_type, DataType::Boolean.wrap_nullable(), "{sql}");
+        }
         writeln!(file, "=== {name} ===\nsql: {sql}")?;
         writeln!(file, "bound: {}", format_scalar(&bound))?;
         writeln!(file, "bound_type: {bound_type}")?;
@@ -149,6 +183,46 @@ async fn test_auto_cast_rules_in_production_pipeline() -> Result<()> {
             "SELECT i FROM cast_pipeline WHERE i > 1::Int64 AND i < 100::Int64",
         ),
         (
+            "integer_equality",
+            "Move lossless integer equality narrowing from checking to the scalar boundary.",
+            "SELECT i FROM cast_pipeline WHERE i = 1::Int64",
+        ),
+        (
+            "nullable_equality_constant",
+            "Keep the checked Nullable(Boolean) signature when the constant is explicitly nullable.",
+            "SELECT assume_not_null(i) = CAST(1 AS INT NULL) FROM cast_pipeline",
+        ),
+        (
+            "unsigned_integer_equality",
+            "Move the inferred UInt64-to-Int64 cast to the literal before relational optimization.",
+            "SELECT v FROM cast_unsigned WHERE v = 1::Int64",
+        ),
+        (
+            "unsigned_nullable_equality_constant",
+            "Retain a nullable-only UInt64 lift, not the overflowing Int64 conversion.",
+            "SELECT n = CAST(1 AS INT64 NULL) FROM cast_unsigned",
+        ),
+        (
+            "aggregate_equality_input",
+            "Optimize the equality before the aggregate extracts its scalar input.",
+            "SELECT count_if(v = 1::Int64) FROM cast_unsigned",
+        ),
+        (
+            "udf_equality_input",
+            "Optimize scalar arguments without entering runtime UDF code.",
+            "SELECT cast_identity(v = 1::Int64) FROM cast_unsigned",
+        ),
+        (
+            "subquery_equality_input",
+            "Optimize the outer comparison input before subquery decorrelation.",
+            "SELECT (v = 1::Int64) IN (SELECT true) FROM cast_unsigned",
+        ),
+        (
+            "unsigned_lambda_equality",
+            "Move the integer cast inside the lambda before RemoteExpr compilation.",
+            "SELECT array_transform([v], x -> x = 1::Int64) FROM cast_unsigned",
+        ),
+        (
             "projection",
             "Keep the enclosing IF expression and its nullable result contract.",
             "SELECT if(i > 1::Int64, big, 0) FROM cast_pipeline",
@@ -179,6 +253,9 @@ async fn test_auto_cast_rules_in_production_pipeline() -> Result<()> {
             description,
             setup_sqls: &[
                 "CREATE TABLE cast_pipeline(i Int32 NULL, big Int64 NULL, a Array(Int32))",
+                "CREATE TABLE cast_unsigned(n UInt64 NOT NULL, v UInt64 NULL)",
+                "CREATE FUNCTION cast_identity (BOOLEAN) RETURNS BOOLEAN LANGUAGE javascript \
+                 HANDLER = 'cast_identity' AS $$export function cast_identity(x) { return x; }$$",
             ],
             sql,
         };
@@ -286,9 +363,22 @@ async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
         "CAST(delta AS Int64) > 1::Int64",
         "number = 9007199254740992::Float64",
         "wide = 1::Int64",
+        "1::Int64 = wide",
+        "count_if(wide = 1::Int64)",
+        "assume_not_null(wide) = CAST(1 AS INT64 NULL)",
+        "wide = 9223372036854775807::Int64",
+        "wide = -1::Int64",
+        "CAST(wide AS Int64) = 1::Int64",
         "delta <= 1::Int64",
         "delta >= 1::Int64",
         "delta <> 1::Int64",
+        "delta = 1::Int64",
+        "1::Int64 = delta",
+        "delta = CAST(1 AS INT NULL)",
+        "delta = CAST(NULL AS INT NULL)",
+        "assume_not_null(delta) = CAST(1 AS INT NULL)",
+        "CAST(1 AS INT NULL) = assume_not_null(delta)",
+        "delta = 9223372036854775807::Int64",
         "assume_not_null(delta) > 1::Int64",
         "delta > delta",
         "delta > number",
@@ -306,7 +396,8 @@ async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
             DataType::Number(NumberDataType::UInt64),
         );
         let tokens = tokenize_sql(sql)?;
-        let ast = parse_expr(&tokens, adapter.sql_dialect()?)?;
+        let dialect = adapter.sql_dialect()?;
+        let ast = parse_expr(&tokens, dialect)?;
         let mut checker = TypeChecker::try_create_with_adapter(
             &mut context,
             adapter,
@@ -315,10 +406,36 @@ async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
             &[],
         )?;
         let (bound, data_type) = *checker.resolve(&ast)?;
-        let original = bound
+        // Compare mixed-sign equality to the end-to-end SQL behavior before
+        // moving integer-literal narrowing out of ExprChecker. The newly bound
+        // intermediate Int64 AutoCast may overflow and is not that baseline.
+        let reference_sql = match sql {
+            "wide = 1::Int64" => "wide = 1::UInt64",
+            "count_if(wide = 1::Int64)" => "count_if(wide = 1::UInt64)",
+            "1::Int64 = wide" => "1::UInt64 = wide",
+            "assume_not_null(wide) = CAST(1 AS INT64 NULL)" => {
+                "assume_not_null(wide) = CAST(1 AS UINT64 NULL)"
+            }
+            "wide = 9223372036854775807::Int64" => "wide = 9223372036854775807::UInt64",
+            _ => sql,
+        };
+        let reference_tokens = tokenize_sql(reference_sql)?;
+        let reference_ast = parse_expr(&reference_tokens, dialect)?;
+        let (reference, _) = *checker.resolve(&reference_ast)?;
+        let reference = if let ScalarExpr::AggregateFunction(aggregate) = &reference {
+            &aggregate.args[0]
+        } else {
+            &reference
+        };
+        let original = reference
             .as_expr()?
             .project_column_ref(|column| Ok(column.index))?;
         let (optimized, _) = scalar::optimize(bound, data_type, &func_ctx)?;
+        let optimized = if let ScalarExpr::AggregateFunction(aggregate) = &optimized {
+            &aggregate.args[0]
+        } else {
+            &optimized
+        };
         let optimized = optimized
             .as_expr()?
             .project_column_ref(|column| Ok(column.index))?;
@@ -337,10 +454,13 @@ async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
                     Symbol::new(0),
                     Scalar::Number(NumberScalar::Int64(9007199254740993)),
                 ),
-                (
-                    Symbol::new(7),
-                    Scalar::Number(NumberScalar::UInt64(u64::MAX)),
-                ),
+                (Symbol::new(7), match delta {
+                    None => Scalar::Null,
+                    Some(i32::MIN) => Scalar::from(u64::MAX),
+                    Some(-1) => Scalar::from(i64::MAX as u64 + 1),
+                    Some(i32::MAX) => Scalar::from(i64::MAX as u64),
+                    Some(value) => Scalar::from(value as u64),
+                }),
                 (
                     Symbol::new(3),
                     delta.map_or(Scalar::Null, |value| {
@@ -360,12 +480,11 @@ async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
                 (Ok(before), Ok(after)) => assert_eq!(before, after, "{sql}, delta={delta:?}"),
                 (Err(before), Err(after)) => {
                     assert_eq!(before.code(), after.code(), "{sql}, delta={delta:?}");
-                    // Evaluator appends the rendered whole expression, which
-                    // is expected to change. Compare the failure itself, not
-                    // that diagnostic rendering of the rewritten tree.
+                    // The rendered input expression and signature hint may
+                    // change when a literal conversion folds; the failure must not.
                     assert_eq!(
-                        before.message().split(", during run expr:").next(),
-                        after.message().split(", during run expr:").next(),
+                        before.message().split(" in expr `").next(),
+                        after.message().split(" in expr `").next(),
                         "{sql}, delta={delta:?}"
                     );
                 }

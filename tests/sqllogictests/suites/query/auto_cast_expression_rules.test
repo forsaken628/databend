@@ -1,5 +1,5 @@
-# Whole-expression implicit conversion rewrites must preserve NULLs, overflow
-# behavior and explicit/lossy conversions.
+# Whole-expression implicit conversion rewrites must preserve NULLs and the
+# SQL behavior of integer equality, while retaining explicit/lossy conversions.
 statement ok
 CREATE TABLE auto_cast_rules(i Int32 NULL, big Int64 NULL)
 
@@ -49,5 +49,62 @@ SELECT count(*) FROM auto_cast_rules WHERE CAST(i AS Int64) > 1::Int64
 ----
 1
 
+query I
+SELECT count(*) FROM auto_cast_rules WHERE i = CAST(1 AS INT NULL)
+----
+1
+
+query I
+SELECT count(*) FROM auto_cast_rules WHERE CAST(1 AS INT NULL) = i
+----
+1
+
+query I
+SELECT count(*) FROM auto_cast_rules WHERE is_null(i = CAST(NULL AS INT NULL))
+----
+3
+
 statement ok
 DROP TABLE auto_cast_rules
+
+# Integer equality moves only the inferred cast onto a representable literal.
+# UInt64::MAX must compare false, not overflow in the intermediate Int64 overload.
+statement ok
+CREATE TABLE auto_cast_unsigned(n UInt64 NOT NULL, v UInt64 NULL)
+
+statement ok
+INSERT INTO auto_cast_unsigned VALUES (18446744073709551615, 18446744073709551615), (1, 1), (0, NULL)
+
+query I
+SELECT count(*) FROM auto_cast_unsigned WHERE v = 1::Int64
+----
+1
+
+query I
+SELECT count(*) FROM auto_cast_unsigned WHERE 1::Int64 = v
+----
+1
+
+# Preserve the checked nullable result while dropping the overflowing value cast.
+query I
+SELECT count(*) FROM auto_cast_unsigned WHERE n = CAST(1 AS INT64 NULL)
+----
+1
+
+query I
+SELECT count(*) FROM auto_cast_unsigned WHERE is_null(v = 1::Int64)
+----
+1
+
+query I
+SELECT count_if(v = 1::Int64) FROM auto_cast_unsigned
+----
+1
+
+query I
+SELECT max(w) FROM (SELECT count_if(v = 1::Int64) OVER () AS w FROM auto_cast_unsigned) t
+----
+1
+
+statement ok
+DROP TABLE auto_cast_unsigned

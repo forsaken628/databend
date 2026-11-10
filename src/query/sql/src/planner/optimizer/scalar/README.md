@@ -8,8 +8,9 @@ This keeps their optimized representation consistent with SELECT expressions
 for deterministic window-input reuse. Window return types, frames, ordering
 options and the restriction against reusing nondeterministic inputs are unchanged.
 Binding still owns name/scope resolution, special-function semantics,
-bind-required constants and existing bind-time folding. The expression checker's
-pre-existing integer-equality literal normalization is retained.
+bind-required constants and existing bind-time folding. Integer-equality literal
+narrowing runs here, not in the expression checker: checking retains literal
+types and only selects signatures and required coercions.
 
 The pass makes one postorder traversal of the bound scalar. It has two concrete
 rewrites; there is no candidate iterator, whole-tree reconstruction, cost model,
@@ -37,15 +38,23 @@ Match `cmp(AutoCast<U>(e:T), k:U)`, or the reversed argument order, where `cmp`
 is `eq`, `noteq`, `lt`, `lte`, `gt` or `gte`. The constant-side inferred
 conversions have already folded. Require:
 
-- T and U are numeric types, and T -> U is lossless and injective;
+- T and U are numeric types, and T -> U is lossless and injective, except that
+  integer `eq` also permits checked integer conversions that may overflow;
 - converting the literal from U to T and back succeeds with the same value;
 - the comparison accepts the proposed argument types without new runtime
   conversions and returns exactly the original result type.
 
-Then replace it with `cmp(e:T, k':T)`. For example, with nullable Int32 `delta`,
+Then replace it with `cmp(e:T, k':T)`, retaining a nullable-only lift when the
+checked result requires it. For example, with nullable Int32 `delta`,
 `delta > 1::Int64` binds with a widening runtime conversion and becomes an
-Int32 comparison. An out-of-range literal or an Int64-to-Float64 runtime
-conversion does not qualify. Explicit casts are not matched or stripped.
+Int32 comparison. Integer `eq` also handles `wide:UInt64 = 1::Int64`: move the
+inferred UInt64-to-Int64 conversion onto the literal so that `UInt64::MAX`
+compares false instead of overflowing. This preserves the end-to-end behavior
+of the former pre-check integer-literal rule, not the transient overflow of the
+newly bound expression. A negative literal that cannot convert to UInt64, an
+out-of-range literal or an Int64-to-Float64 runtime conversion does not qualify.
+Explicit casts are not matched or stripped. An explicitly nullable constant
+retains the comparison's checked nullable result type.
 
 Only the comparison's new argument types are checked. Both rewrites preserve
 their own result type, so enclosing functions and the externally reported bind
@@ -59,8 +68,11 @@ hand-built trees. Ordinary function binding does not create identity casts, and
 numeric comparison registration already selects the earlier compatible integer
 type. New rules need an actual SQL-to-bound-expression example first.
 
-Standalone aggregate, subquery and runtime UDF internals remain opaque inputs.
-This module does not change relational optimizer rules. Regression coverage in
+Aggregate arguments and ordering, UDF/UDAF/async-call arguments and subquery
+comparison inputs use the same traversal; otherwise moving a checker rewrite
+would miss the same SQL expression inside those inputs. Subquery relational
+plans and runtime UDF bodies remain opaque. This module does not change
+relational optimizer rules. Regression coverage in
 `tests/it/semantic/type_check/auto_cast.rs` starts from SQL and includes bound,
 optimized and lowered expressions, evaluation equivalence, idempotence and
 production raw/optimized plan goldens.

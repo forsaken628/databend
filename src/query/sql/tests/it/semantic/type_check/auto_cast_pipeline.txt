@@ -19,6 +19,199 @@ Scan
 ├── order by: []
 └── limit: NONE
 
+=== integer_equality ===
+description: Move lossless integer equality narrowing from checking to the scalar boundary.
+sql: SELECT i FROM cast_pipeline WHERE i = 1::Int64
+raw_plan:
+EvalScalar
+├── scalars: [cast_pipeline.i (#0) AS (#0)]
+└── Filter
+    ├── filters: [eq(cast_pipeline.i (#0), 1)]
+    └── Scan
+        ├── table: default.cast_pipeline (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.cast_pipeline (#0)
+├── filters: [eq(cast_pipeline.i (#0), 1)]
+├── order by: []
+└── limit: NONE
+
+=== nullable_equality_constant ===
+description: Keep the checked Nullable(Boolean) signature when the constant is explicitly nullable.
+sql: SELECT assume_not_null(i) = CAST(1 AS INT NULL) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [eq(CAST(assume_not_null(cast_pipeline.i (#0)) AS Int32 NULL), 1) AS (#3)]
+└── Scan
+    ├── table: default.cast_pipeline (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [eq(CAST(assume_not_null(cast_pipeline.i (#0)) AS Int32 NULL), 1) AS (#3)]
+└── Scan
+    ├── table: default.cast_pipeline (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+=== unsigned_integer_equality ===
+description: Move the inferred UInt64-to-Int64 cast to the literal before relational optimization.
+sql: SELECT v FROM cast_unsigned WHERE v = 1::Int64
+raw_plan:
+EvalScalar
+├── scalars: [cast_unsigned.v (#1) AS (#1)]
+└── Filter
+    ├── filters: [eq(cast_unsigned.v (#1), 1)]
+    └── Scan
+        ├── table: default.cast_unsigned (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.cast_unsigned (#0)
+├── filters: [eq(cast_unsigned.v (#1), 1)]
+├── order by: []
+└── limit: NONE
+
+=== unsigned_nullable_equality_constant ===
+description: Retain a nullable-only UInt64 lift, not the overflowing Int64 conversion.
+sql: SELECT n = CAST(1 AS INT64 NULL) FROM cast_unsigned
+raw_plan:
+EvalScalar
+├── scalars: [eq(CAST(cast_unsigned.n (#0) AS UInt64 NULL), 1) AS (#2)]
+└── Scan
+    ├── table: default.cast_unsigned (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [eq(CAST(cast_unsigned.n (#0) AS UInt64 NULL), 1) AS (#2)]
+└── Scan
+    ├── table: default.cast_unsigned (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+=== aggregate_equality_input ===
+description: Optimize the equality before the aggregate extracts its scalar input.
+sql: SELECT count_if(v = 1::Int64) FROM cast_unsigned
+raw_plan:
+EvalScalar
+├── scalars: [count_if(v = 1::Int64) (#3) AS (#3)]
+└── Aggregate(Initial)
+    ├── group items: []
+    ├── aggregate functions: [count_if(count_if_arg_0 (#2)) AS (#3)]
+    └── EvalScalar
+        ├── scalars: [eq(cast_unsigned.v (#1), 1) AS (#2)]
+        └── Scan
+            ├── table: default.cast_unsigned (#0)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+optimized_plan:
+Aggregate(Final)
+├── group items: []
+├── aggregate functions: [count_if(count_if_arg_0 (#2)) AS (#3)]
+└── Aggregate(Partial)
+    ├── group items: []
+    ├── aggregate functions: [count_if(count_if_arg_0 (#2)) AS (#3)]
+    └── EvalScalar
+        ├── scalars: [eq(cast_unsigned.v (#1), 1) AS (#2)]
+        └── Scan
+            ├── table: default.cast_unsigned (#0)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+=== udf_equality_input ===
+description: Optimize scalar arguments without entering runtime UDF code.
+sql: SELECT cast_identity(v = 1::Int64) FROM cast_unsigned
+raw_plan:
+EvalScalar
+├── scalars: [cast_identity(v = 1::Int64) (#2) AS (#2)]
+└── UdfScript
+    ├── scalars: [cast_identity(cast_identity(v = 1::Int64)_arg_0 (#3)) AS (#2)]
+    └── EvalScalar
+        ├── scalars: [eq(cast_unsigned.v (#1), 1) AS (#3)]
+        └── Scan
+            ├── table: default.cast_unsigned (#0)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+optimized_plan:
+UdfScript
+├── scalars: [cast_identity(cast_identity(v = 1::Int64)_arg_0 (#3)) AS (#2)]
+└── EvalScalar
+    ├── scalars: [eq(cast_unsigned.v (#1), 1) AS (#3)]
+    └── Scan
+        ├── table: default.cast_unsigned (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+=== subquery_equality_input ===
+description: Optimize the outer comparison input before subquery decorrelation.
+sql: SELECT (v = 1::Int64) IN (SELECT true) FROM cast_unsigned
+raw_plan:
+EvalScalar
+├── scalars: [SUBQUERY AS (#2) AS (#3)]
+├── subquerys
+│   └── Subquery (Any)
+│       ├── compare_op: Equal
+│       ├── output_column: TRUE (#2)
+│       ├── projection_index: v = 1::Int64 IN(SELECT TRUE) (#3)
+│       └── EvalScalar
+│           ├── scalars: [true AS (#2)]
+│           └── DummyTableScan(DummyTableScan { source_table_indexes: [] })
+└── Scan
+    ├── table: default.cast_unsigned (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [eq(eq(cast_unsigned.v (#1), 1), true) AS (#3)]
+└── Scan
+    ├── table: default.cast_unsigned (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+=== unsigned_lambda_equality ===
+description: Move the integer cast inside the lambda before RemoteExpr compilation.
+sql: SELECT array_transform([v], x -> x = 1::Int64) FROM cast_unsigned
+raw_plan:
+EvalScalar
+├── scalars: [array_transform(array(cast_unsigned.v (#1)), ["x"] -> x (#2) = 1) AS (#2)]
+└── Scan
+    ├── table: default.cast_unsigned (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [array_transform(array(cast_unsigned.v (#1)), ["x"] -> x (#2) = 1) AS (#2)]
+└── Scan
+    ├── table: default.cast_unsigned (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
 === projection ===
 description: Keep the enclosing IF expression and its nullable result contract.
 sql: SELECT if(i > 1::Int64, big, 0) FROM cast_pipeline

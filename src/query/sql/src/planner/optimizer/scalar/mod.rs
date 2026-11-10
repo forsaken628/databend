@@ -49,6 +49,11 @@ fn rewrite(scalar: &mut ScalarExpr, func_ctx: &FunctionContext) {
             }
             auto_cast::move_cast_to_constant(call, func_ctx);
         }
+        ScalarExpr::AggregateFunction(aggregate) => {
+            for argument in aggregate.exprs_mut() {
+                rewrite(argument, func_ctx);
+            }
+        }
         ScalarExpr::WindowFunction(window) => {
             for partition in &mut window.partition_by {
                 rewrite(partition, func_ctx);
@@ -85,9 +90,28 @@ fn rewrite(scalar: &mut ScalarExpr, func_ctx: &FunctionContext) {
             }
         }
         ScalarExpr::UDFLambdaCall(udf) => rewrite(&mut udf.scalar, func_ctx),
-        // Standalone aggregate/subquery/runtime UDF bodies are not scalar inputs.
-        // Window inputs are rewritten before extraction into WindowFunctionInfo;
-        // lambda bodies are processed before their RemoteExpr compilation.
+        ScalarExpr::SubqueryExpr(subquery) => {
+            if let Some(input) = &mut subquery.child_expr {
+                rewrite(input, func_ctx);
+            }
+        }
+        ScalarExpr::UDFCall(udf) => {
+            for argument in &mut udf.arguments {
+                rewrite(argument, func_ctx);
+            }
+        }
+        ScalarExpr::UDAFCall(udaf) => {
+            for argument in &mut udaf.arguments {
+                rewrite(argument, func_ctx);
+            }
+        }
+        ScalarExpr::AsyncFunctionCall(function) => {
+            for argument in &mut function.arguments {
+                rewrite(argument, func_ctx);
+            }
+        }
+        // Only scalar inputs are traversed, not subquery plans or runtime UDF
+        // bodies. Lambda bodies are processed before RemoteExpr compilation.
         _ => {}
     }
 

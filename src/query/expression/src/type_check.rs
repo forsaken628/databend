@@ -31,7 +31,6 @@ use crate::ExprVisitor;
 use crate::FoldRules;
 use crate::FunctionContext;
 use crate::Scalar;
-use crate::cast_scalar;
 use crate::expr::*;
 use crate::expression::Expr;
 use crate::expression::RawExpr;
@@ -131,45 +130,7 @@ impl<'a> ExprChecker<'a> {
                 args,
                 params,
             } => {
-                let mut args_expr: Vec<_> = args.iter().map(|arg| self.check(arg)).try_collect()?;
-
-                // https://github.com/datafuselabs/databend/issues/11541
-                // c:int16 = 12456 will be resolve as `to_int32(c) == to_int32(12456)`
-                // This may hurt the bloom filter, we should try cast to literal as the datatype of column
-                if name == "eq" && args_expr.len() == 2 {
-                    match args_expr.as_mut_slice() {
-                        [
-                            e,
-                            Expr::Constant(Constant {
-                                span,
-                                scalar,
-                                data_type,
-                            }),
-                        ]
-                        | [
-                            Expr::Constant(Constant {
-                                span,
-                                scalar,
-                                data_type,
-                            }),
-                            e,
-                        ] => {
-                            let src_ty = data_type.remove_nullable();
-                            let dest_ty = e.data_type().remove_nullable();
-
-                            if dest_ty.is_integer() && src_ty.is_integer() {
-                                if let Ok(casted_scalar) =
-                                    cast_scalar(*span, scalar.clone(), &dest_ty, self.fn_registry)
-                                {
-                                    *scalar = casted_scalar;
-                                    *data_type = scalar.as_ref().infer_data_type();
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
+                let args_expr: Vec<_> = args.iter().map(|arg| self.check(arg)).try_collect()?;
                 self.check_function(*span, name, params, &args_expr)
             }
             RawExpr::LambdaFunctionCall {

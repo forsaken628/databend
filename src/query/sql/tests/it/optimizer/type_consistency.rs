@@ -126,7 +126,7 @@ async fn test_optimizer_rewrites_keep_function_return_types_consistent() -> Resu
         },
         SqlTestCase {
             name: "binder_folded_argument_refreshes_function_return_types",
-            description: "Folding `CAST(1 AS INT NULL)` to `1_u8` drops the argument's nullability.",
+            description: "An explicitly nullable constant and the equality signature must agree after binding.",
             setup_sqls: &["CREATE TABLE folded_arg_t(a INT NOT NULL)"],
             sql: "SELECT a + CAST(1 AS INT NULL) FROM folded_arg_t \
                   WHERE a = CAST(1 AS INT NULL) AND a + 1 > 0",
