@@ -1,0 +1,258 @@
+=== partition_input_reuse ===
+description: Fold the nullable literal conversion in both SELECT and the partition input.
+sql: SELECT i + 1 AS n, row_number() OVER (PARTITION BY i + 1 ORDER BY big) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [row_number() OVER (PARTITION BY i + 1 ORDER BY big) (#3) AS (#3), row_number_part_0 (#2) AS (#4)]
+└── Window
+    ├── aggregate function: row_number
+    ├── partition items: [plus(cast_pipeline.i (#0), 1) AS (#2)]
+    ├── order by items: [cast_pipeline.big (#1) AS (#1)]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [row_number_part_0 (#2) ASC NULLS LAST, cast_pipeline.big (#1) ASC NULLS LAST]
+        ├── limit: [NONE]
+        ├── window top: NONE
+        ├── window function: RowNumber
+        └── EvalScalar
+            ├── scalars: [cast_pipeline.big (#1) AS (#1), plus(cast_pipeline.i (#0), 1) AS (#2)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [row_number() OVER (PARTITION BY i + 1 ORDER BY big) (#3) AS (#3), row_number_part_0 (#2) AS (#4)]
+└── Window
+    ├── aggregate function: row_number
+    ├── partition items: [plus(cast_pipeline.i (#0), 1) AS (#2)]
+    ├── order by items: [cast_pipeline.big (#1) AS (#1)]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [row_number_part_0 (#2) ASC NULLS LAST, cast_pipeline.big (#1) ASC NULLS LAST]
+        ├── limit: [NONE]
+        ├── window top: NONE
+        ├── window function: RowNumber
+        └── EvalScalar
+            ├── scalars: [cast_pipeline.big (#1) AS (#1), plus(cast_pipeline.i (#0), 1) AS (#2)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: [row_number_part_0 (#2) ASC, cast_pipeline.big (#1) ASC]
+                └── limit: NONE
+
+=== order_input_reuse ===
+description: Narrow the comparison in both SELECT and ORDER BY, preserving DESC and NULLS FIRST.
+sql: SELECT i > 1::Int64 AS n, row_number() OVER (ORDER BY i > 1::Int64 DESC NULLS FIRST) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [row_number() OVER (ORDER BY i > 1::Int64 DESC NULLS FIRST) (#3) AS (#3), row_number_order_0 (#2) AS (#4)]
+└── Window
+    ├── aggregate function: row_number
+    ├── partition items: []
+    ├── order by items: [gt(cast_pipeline.i (#0), 1) AS (#2) DESC NULLS FIRST]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [row_number_order_0 (#2) DESC NULLS FIRST]
+        ├── limit: [NONE]
+        └── EvalScalar
+            ├── scalars: [gt(cast_pipeline.i (#0), 1) AS (#2)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [row_number() OVER (ORDER BY i > 1::Int64 DESC NULLS FIRST) (#3) AS (#3), row_number_order_0 (#2) AS (#4)]
+└── Window
+    ├── aggregate function: row_number
+    ├── partition items: []
+    ├── order by items: [gt(cast_pipeline.i (#0), 1) AS (#2) DESC NULLS FIRST]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [row_number_order_0 (#2) DESC NULLS FIRST]
+        ├── limit: [NONE]
+        └── EvalScalar
+            ├── scalars: [gt(cast_pipeline.i (#0), 1) AS (#2)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: [row_number_order_0 (#2) DESC]
+                └── limit: NONE
+
+=== aggregate_argument ===
+description: Optimize the aggregate window input without changing its frame or return type.
+sql: SELECT i + 1 AS n, sum(i + 1) OVER (PARTITION BY big ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [sum(i + 1) OVER (PARTITION BY big ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) (#3) AS (#3), sum_arg_0 (#2) AS (#4)]
+└── Window
+    ├── aggregate function: sum
+    ├── partition items: [cast_pipeline.big (#1) AS (#1)]
+    ├── order by items: [cast_pipeline.i (#0) AS (#0)]
+    ├── frame: [Rows: Preceding(Some(Number(1_u64))) ~ Following(Some(Number(1_u64)))]
+    └── Sort
+        ├── sort keys: [cast_pipeline.big (#1) ASC NULLS LAST, cast_pipeline.i (#0) ASC NULLS LAST]
+        ├── limit: [NONE]
+        ├── window top: NONE
+        ├── window function: Aggregate(AggregateFunction { span: Some(19..105), func_name: "sum", distinct: false, params: [], args: [BoundColumnRef(BoundColumnRef { span: Some(25..26), column: ColumnBinding { database_name: None, table_name: None, column_position: None, table_index: None, column_name: "sum_arg_0", column_name_lower: None, index: 2, data_type: Nullable(Number(Int64)), visibility: Visible, virtual_expr: None, is_srf: false } })], return_type: Nullable(Number(Int64)), sort_descs: [], display_name: "sum(i + 1) OVER (PARTITION BY big ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)" })
+        └── EvalScalar
+            ├── scalars: [cast_pipeline.i (#0) AS (#0), cast_pipeline.big (#1) AS (#1), plus(cast_pipeline.i (#0), 1) AS (#2)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [sum(i + 1) OVER (PARTITION BY big ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) (#3) AS (#3), sum_arg_0 (#2) AS (#4)]
+└── Window
+    ├── aggregate function: sum
+    ├── partition items: [cast_pipeline.big (#1) AS (#1)]
+    ├── order by items: [cast_pipeline.i (#0) AS (#0)]
+    ├── frame: [Rows: Preceding(Some(Number(1_u64))) ~ Following(Some(Number(1_u64)))]
+    └── Sort
+        ├── sort keys: [cast_pipeline.big (#1) ASC NULLS LAST, cast_pipeline.i (#0) ASC NULLS LAST]
+        ├── limit: [NONE]
+        ├── window top: NONE
+        ├── window function: Aggregate(AggregateFunction { span: Some(19..105), func_name: "sum", distinct: false, params: [], args: [BoundColumnRef(BoundColumnRef { span: Some(25..26), column: ColumnBinding { database_name: None, table_name: None, column_position: None, table_index: None, column_name: "sum_arg_0", column_name_lower: None, index: 2, data_type: Nullable(Number(Int64)), visibility: Visible, virtual_expr: None, is_srf: false } })], return_type: Nullable(Number(Int64)), sort_descs: [], display_name: "sum(i + 1) OVER (PARTITION BY big ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)" })
+        └── EvalScalar
+            ├── scalars: [cast_pipeline.i (#0) AS (#0), cast_pipeline.big (#1) AS (#1), plus(cast_pipeline.i (#0), 1) AS (#2)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: [cast_pipeline.big (#1) ASC, cast_pipeline.i (#0) ASC]
+                └── limit: NONE
+
+=== lag_argument_and_default ===
+description: Optimize both the LAG argument and its default before extracting input columns.
+sql: SELECT i > 1::Int64 AS n, lag(i > 1::Int64, 1, i > 1::Int64) OVER (ORDER BY big) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [lag(i > 1::Int64, 1, i > 1::Int64) OVER (ORDER BY big) (#4) AS (#4), lag_arg (#2) AS (#5)]
+└── Window
+    ├── aggregate function: lag
+    ├── partition items: []
+    ├── order by items: [cast_pipeline.big (#1) AS (#1)]
+    ├── frame: [Rows: Preceding(Some(Number(1_u64))) ~ Preceding(Some(Number(1_u64)))]
+    └── Sort
+        ├── sort keys: [cast_pipeline.big (#1) ASC NULLS LAST]
+        ├── limit: [NONE]
+        └── EvalScalar
+            ├── scalars: [cast_pipeline.big (#1) AS (#1), gt(cast_pipeline.i (#0), 1) AS (#2), CAST(gt(cast_pipeline.i (#0), 1) AS Boolean NULL) AS (#3)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [lag(i > 1::Int64, 1, i > 1::Int64) OVER (ORDER BY big) (#4) AS (#4), lag_arg (#2) AS (#5)]
+└── Window
+    ├── aggregate function: lag
+    ├── partition items: []
+    ├── order by items: [cast_pipeline.big (#1) AS (#1)]
+    ├── frame: [Rows: Preceding(Some(Number(1_u64))) ~ Preceding(Some(Number(1_u64)))]
+    └── Sort
+        ├── sort keys: [cast_pipeline.big (#1) ASC NULLS LAST]
+        ├── limit: [NONE]
+        └── EvalScalar
+            ├── scalars: [cast_pipeline.big (#1) AS (#1), gt(cast_pipeline.i (#0), 1) AS (#2), CAST(gt(cast_pipeline.i (#0), 1) AS Boolean NULL) AS (#3)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: [cast_pipeline.big (#1) ASC]
+                └── limit: NONE
+
+=== nth_value_explicit_cast ===
+description: Traverse NTH_VALUE inputs but retain the user-written numeric cast.
+sql: SELECT CAST(i AS Int64) > 1::Int64 AS n, nth_value(CAST(i AS Int64) > 1::Int64, 2) OVER (ORDER BY big) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [nth_value(CAST(i AS Int64) > 1::Int64, 2) OVER (ORDER BY big) (#3) AS (#3), nth_value_arg (#2) AS (#4)]
+└── Window
+    ├── aggregate function: nth_value
+    ├── partition items: []
+    ├── order by items: [cast_pipeline.big (#1) AS (#1)]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [cast_pipeline.big (#1) ASC NULLS LAST]
+        ├── limit: [NONE]
+        └── EvalScalar
+            ├── scalars: [cast_pipeline.big (#1) AS (#1), gt(CAST(cast_pipeline.i (#0) AS Int64 NULL), 1) AS (#2)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [nth_value(CAST(i AS Int64) > 1::Int64, 2) OVER (ORDER BY big) (#3) AS (#3), nth_value_arg (#2) AS (#4)]
+└── Window
+    ├── aggregate function: nth_value
+    ├── partition items: []
+    ├── order by items: [cast_pipeline.big (#1) AS (#1)]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [cast_pipeline.big (#1) ASC NULLS LAST]
+        ├── limit: [NONE]
+        └── EvalScalar
+            ├── scalars: [cast_pipeline.big (#1) AS (#1), gt(CAST(cast_pipeline.i (#0) AS Int64 NULL), 1) AS (#2)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: [cast_pipeline.big (#1) ASC]
+                └── limit: NONE
+
+=== nondeterministic_input_not_reused ===
+description: Optimize deterministic inputs while keeping separate RAND evaluations.
+sql: SELECT i + 1 AS n, rand() AS r, row_number() OVER (PARTITION BY i + 1 ORDER BY rand()) FROM cast_pipeline
+raw_plan:
+EvalScalar
+├── scalars: [row_number() OVER (PARTITION BY i + 1 ORDER BY rand()) (#4) AS (#4), row_number_part_0 (#2) AS (#5), rand() AS (#6)]
+└── Window
+    ├── aggregate function: row_number
+    ├── partition items: [plus(cast_pipeline.i (#0), 1) AS (#2)]
+    ├── order by items: [rand() AS (#3)]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [row_number_part_0 (#2) ASC NULLS LAST, row_number_order_0 (#3) ASC NULLS LAST]
+        ├── limit: [NONE]
+        ├── window top: NONE
+        ├── window function: RowNumber
+        └── EvalScalar
+            ├── scalars: [plus(cast_pipeline.i (#0), 1) AS (#2), rand() AS (#3)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [row_number() OVER (PARTITION BY i + 1 ORDER BY rand()) (#4) AS (#4), row_number_part_0 (#2) AS (#5), rand() AS (#6)]
+└── Window
+    ├── aggregate function: row_number
+    ├── partition items: [plus(cast_pipeline.i (#0), 1) AS (#2)]
+    ├── order by items: [rand() AS (#3)]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [row_number_part_0 (#2) ASC NULLS LAST, row_number_order_0 (#3) ASC NULLS LAST]
+        ├── limit: [NONE]
+        ├── window top: NONE
+        ├── window function: RowNumber
+        └── EvalScalar
+            ├── scalars: [plus(cast_pipeline.i (#0), 1) AS (#2), rand() AS (#3)]
+            └── Scan
+                ├── table: default.cast_pipeline (#0)
+                ├── filters: []
+                ├── order by: [row_number_part_0 (#2) ASC, row_number_order_0 (#3) ASC]
+                └── limit: NONE
+

@@ -217,7 +217,7 @@ EvalScalar
         ├── window top: NONE
         ├── window function: LagLead(LagLeadFunction { is_lag: false, arg: BoundColumnRef(BoundColumnRef { span: Some(12..18), column: ColumnBinding { database_name: Some("default"), table_name: Some("t"), column_position: Some(1), table_index: Some(0), column_name: "number", column_name_lower: None, index: 0, data_type: Nullable(Number(UInt64)), visibility: Visible, virtual_expr: None, is_srf: false } }), offset: 1, default: Some(BoundColumnRef(BoundColumnRef { span: Some(23..24), column: ColumnBinding { database_name: None, table_name: None, column_position: None, table_index: None, column_name: "lead_default_value", column_name_lower: None, index: 1, data_type: Nullable(Number(UInt64)), visibility: Visible, virtual_expr: None, is_srf: false } })), return_type: Nullable(Number(UInt64)) })
         └── EvalScalar
-            ├── scalars: [t.number (#0) AS (#0), CAST(0 AS UInt64 NULL) AS (#1), modulo(t.number (#0), 3) AS (#2), plus(t.number (#0), 1) AS (#3)]
+            ├── scalars: [t.number (#0) AS (#0), 0 AS (#1), modulo(t.number (#0), 3) AS (#2), plus(t.number (#0), 1) AS (#3)]
             └── Scan
                 ├── table: default.t (#0)
                 ├── filters: []

@@ -201,6 +201,73 @@ async fn test_auto_cast_rules_in_production_pipeline() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_window_auto_cast_rules_in_production_pipeline() -> Result<()> {
+    use crate::framework::golden::SqlTestCase;
+    use crate::framework::golden::setup_context;
+    use crate::framework::golden::write_case_header;
+
+    let mut file = open_golden_file("semantic/type_check", "auto_cast_window.txt")?;
+    let options = FormatOptions {
+        show_auto_cast: true,
+        ..Default::default()
+    };
+    for (name, description, sql) in [
+        (
+            "partition_input_reuse",
+            "Fold the nullable literal conversion in both SELECT and the partition input.",
+            "SELECT i + 1 AS n, row_number() OVER (PARTITION BY i + 1 ORDER BY big) FROM cast_pipeline",
+        ),
+        (
+            "order_input_reuse",
+            "Narrow the comparison in both SELECT and ORDER BY, preserving DESC and NULLS FIRST.",
+            "SELECT i > 1::Int64 AS n, row_number() OVER (ORDER BY i > 1::Int64 DESC NULLS FIRST) FROM cast_pipeline",
+        ),
+        (
+            "aggregate_argument",
+            "Optimize the aggregate window input without changing its frame or return type.",
+            "SELECT i + 1 AS n, sum(i + 1) OVER (PARTITION BY big ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM cast_pipeline",
+        ),
+        (
+            "lag_argument_and_default",
+            "Optimize both the LAG argument and its default before extracting input columns.",
+            "SELECT i > 1::Int64 AS n, lag(i > 1::Int64, 1, i > 1::Int64) OVER (ORDER BY big) FROM cast_pipeline",
+        ),
+        (
+            "nth_value_explicit_cast",
+            "Traverse NTH_VALUE inputs but retain the user-written numeric cast.",
+            "SELECT CAST(i AS Int64) > 1::Int64 AS n, nth_value(CAST(i AS Int64) > 1::Int64, 2) OVER (ORDER BY big) FROM cast_pipeline",
+        ),
+        (
+            "nondeterministic_input_not_reused",
+            "Optimize deterministic inputs while keeping separate RAND evaluations.",
+            "SELECT i + 1 AS n, rand() AS r, row_number() OVER (PARTITION BY i + 1 ORDER BY rand()) FROM cast_pipeline",
+        ),
+    ] {
+        let case = SqlTestCase {
+            name,
+            description,
+            setup_sqls: &["CREATE TABLE cast_pipeline(i Int32 NULL, big Int64 NULL)"],
+            sql,
+        };
+        let ctx = setup_context(&case).await?;
+        let raw = ctx.bind_sql(case.sql).await?;
+        write_case_header(&mut file, &case)?;
+        writeln!(
+            file,
+            "raw_plan:\n{}",
+            raw.format_indent(options.clone(), &ctx.stat_context()?)?
+        )?;
+        let optimized = ctx.optimize_plan(raw).await?;
+        writeln!(
+            file,
+            "optimized_plan:\n{}",
+            optimized.format_indent(options.clone(), &ctx.stat_context()?)?
+        )?;
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
     use databend_common_expression::DataBlock;
     use databend_common_expression::Evaluator;
@@ -304,6 +371,117 @@ async fn test_numeric_auto_cast_rules_preserve_evaluation() -> Result<()> {
                 }
                 (before, after) => {
                     panic!("evaluation changed: {sql}, delta={delta:?}: {before:?} -> {after:?}")
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_window_auto_cast_inputs_preserve_evaluation() -> Result<()> {
+    use databend_common_expression::DataBlock;
+    use databend_common_expression::Evaluator;
+    use databend_common_expression::Expr;
+
+    init_testing_globals();
+    for sql in [
+        "row_number() OVER (PARTITION BY delta + 1 ORDER BY delta > 1::Int64 DESC NULLS FIRST)",
+        "sum(delta + 1) OVER (ORDER BY number ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)",
+        "array_agg(delta + 1) WITHIN GROUP (ORDER BY delta > 1::Int64 DESC NULLS FIRST) OVER ()",
+        "lag(delta > 1::Int64, 1, delta > 1::Int64) OVER (ORDER BY number)",
+        "lead(delta + 1, 1, delta + 1) OVER (ORDER BY number)",
+        "nth_value(CAST(delta AS UInt8), 2) OVER (ORDER BY number)",
+        "row_number() OVER (ORDER BY number > 'not a number')",
+    ] {
+        let settings = Settings::create(Tenant::new_literal("default"));
+        let adapter = TestTypeCheckAdapter::new(settings);
+        let func_ctx = adapter.func_ctx.clone();
+        let names = NameResolutionContext::try_from(adapter.settings.as_ref())?;
+        let mut context = test_bind_context(ExprContext::Unknown);
+        let tokens = tokenize_sql(sql)?;
+        let ast = parse_expr(&tokens, adapter.sql_dialect()?)?;
+        let mut checker = TypeChecker::try_create_with_adapter(
+            &mut context,
+            adapter,
+            &names,
+            Arc::new(RwLock::new(Metadata::default())),
+            &[],
+        )?;
+        let (bound, data_type) = *checker.resolve(&ast)?;
+        let (optimized, optimized_type) =
+            scalar::optimize(bound.clone(), data_type.clone(), &func_ctx)?;
+        assert_eq!(optimized_type, data_type, "{sql}");
+        let (again, again_type) = scalar::optimize(optimized.clone(), optimized_type, &func_ctx)?;
+        assert_eq!(again, optimized, "idempotence: {sql}");
+        assert_eq!(again_type, data_type, "{sql}");
+        let (ScalarExpr::WindowFunction(before), ScalarExpr::WindowFunction(after)) =
+            (&bound, &optimized)
+        else {
+            panic!("expected window function: {sql}");
+        };
+        assert_eq!(before.frame, after.frame, "{sql}");
+        for (before, after) in before.order_by.iter().zip(&after.order_by) {
+            assert_eq!(
+                (before.asc, before.nulls_first),
+                (after.asc, after.nulls_first)
+            );
+        }
+        let before = before
+            .partition_by
+            .iter()
+            .chain(before.order_by.iter().map(|order| &order.expr))
+            .chain(before.func.scalar_expr_iter());
+        let after = after
+            .partition_by
+            .iter()
+            .chain(after.order_by.iter().map(|order| &order.expr))
+            .chain(after.func.scalar_expr_iter());
+        for (before, after) in before.zip(after) {
+            assert_eq!(before.data_type(), after.data_type(), "{sql}");
+            let before = before
+                .as_expr()?
+                .project_column_ref(|column| Ok(column.index))?;
+            let after = after
+                .as_expr()?
+                .project_column_ref(|column| Ok(column.index))?;
+            for delta in [
+                None,
+                Some(i32::MIN),
+                Some(-1),
+                Some(0),
+                Some(2),
+                Some(i32::MAX),
+            ] {
+                let values = HashMap::from([
+                    (Symbol::new(0), Scalar::from(1_i64)),
+                    (Symbol::new(3), delta.map_or(Scalar::Null, Scalar::from)),
+                ]);
+                let before: Expr = before.fill_const_column(&values).project_column_ref(|_| {
+                    unreachable!("all window inputs must have test values")
+                })?;
+                let after: Expr = after.fill_const_column(&values).project_column_ref(|_| {
+                    unreachable!("all window inputs must have test values")
+                })?;
+                let block = DataBlock::empty_with_rows(1);
+                let evaluator = Evaluator::new(&block, &func_ctx, &BUILTIN_FUNCTIONS);
+                match (evaluator.run(&before), evaluator.run(&after)) {
+                    (Ok(before), Ok(after)) => assert_eq!(before, after, "{sql}, {delta:?}"),
+                    (Err(before), Err(after)) => {
+                        assert_eq!(before.code(), after.code(), "{sql}, {delta:?}");
+                        assert_eq!(
+                            // The diagnostic renders the input tree, whose
+                            // folded constant conversions are allowed to differ.
+                            before.message().split(" in expr `").next(),
+                            after.message().split(" in expr `").next(),
+                            "{sql}, {delta:?}"
+                        );
+                    }
+                    (before, after) => {
+                        panic!(
+                            "window input evaluation changed: {sql}, {delta:?}: {before:?} -> {after:?}"
+                        )
+                    }
                 }
             }
         }

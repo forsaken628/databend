@@ -30,41 +30,59 @@ mod alias_resolution;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_window_input_reuse_preserves_nondeterministic_expressions() -> Result<()> {
-    let case = SqlTestCase {
-        name: "window_input_reuse_preserves_nondeterministic_expressions",
-        description: "Only deterministic window inputs may replace SELECT expressions.",
-        setup_sqls: &["CREATE TABLE t(number UInt64)"],
-        sql: "SELECT number + 1 AS n, rand() AS r, \
-              row_number() OVER (PARTITION BY number + 1 ORDER BY rand()) FROM t",
-    };
-    let ctx = setup_context(&case).await?;
-    let Plan::Query {
-        s_expr,
-        bind_context,
-        ..
-    } = ctx.bind_sql(case.sql).await?
-    else {
-        panic!("expected query plan");
-    };
-    let RelOperator::EvalScalar(projection) = s_expr.logical()?.plan() else {
-        panic!("expected SELECT projection");
-    };
-    for (name, reused) in [("n", true), ("r", false)] {
-        let column = bind_context
-            .columns
-            .iter()
-            .find(|column| column.column_name == name)
-            .unwrap();
-        let item = projection
-            .items
-            .iter()
-            .find(|item| item.index == column.index)
-            .unwrap();
-        assert_eq!(
-            matches!(item.scalar, ScalarExpr::BoundColumnRef(_)),
-            reused,
-            "projection {name}"
-        );
+    for sql in [
+        "SELECT number + 1 AS n, rand() AS r, \
+         row_number() OVER (PARTITION BY number + 1 ORDER BY rand()) FROM t",
+        "SELECT number + 1 AS n, rand() AS r, \
+         row_number() OVER (ORDER BY number + 1 DESC NULLS FIRST, rand()) FROM t",
+        "SELECT number + 1 AS n, rand() AS r, sum(number + 1) OVER () FROM t",
+        "SELECT number + 1 AS n, rand() AS r, \
+         array_agg(number) WITHIN GROUP (ORDER BY number + 1) OVER () FROM t",
+        "SELECT number + 1 AS n, rand() AS r, \
+         lag(number + 1, 1, number + 1) OVER (ORDER BY number) FROM t",
+        "SELECT number + 1 AS n, rand() AS r, \
+         lead(number + 1, 1, number + 1) OVER (ORDER BY number) FROM t",
+        "SELECT number + 1 AS n, rand() AS r, \
+         nth_value(number + 1, 2) OVER (ORDER BY number) FROM t",
+        "SELECT number + 1 AS n, rand() AS r, \
+         row_number() OVER (PARTITION BY number + 1), \
+         rank() OVER (ORDER BY number + 1) FROM t",
+    ] {
+        let case = SqlTestCase {
+            name: "window_input_reuse_preserves_nondeterministic_expressions",
+            description: "Only deterministic window inputs may replace SELECT expressions.",
+            setup_sqls: &["CREATE TABLE t(number UInt64)"],
+            sql,
+        };
+        let ctx = setup_context(&case).await?;
+        let Plan::Query {
+            s_expr,
+            bind_context,
+            ..
+        } = ctx.bind_sql(case.sql).await?
+        else {
+            panic!("expected query plan");
+        };
+        let RelOperator::EvalScalar(projection) = s_expr.logical()?.plan() else {
+            panic!("expected SELECT projection");
+        };
+        for (name, reused) in [("n", true), ("r", false)] {
+            let column = bind_context
+                .columns
+                .iter()
+                .find(|column| column.column_name == name)
+                .unwrap();
+            let item = projection
+                .items
+                .iter()
+                .find(|item| item.index == column.index)
+                .unwrap();
+            assert_eq!(
+                matches!(item.scalar, ScalarExpr::BoundColumnRef(_)),
+                reused,
+                "projection {name}: {sql}"
+            );
+        }
     }
     Ok(())
 }

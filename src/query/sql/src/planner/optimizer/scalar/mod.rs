@@ -25,6 +25,7 @@ use databend_common_functions::BUILTIN_FUNCTIONS;
 
 use crate::plans::ConstantExpr;
 use crate::plans::ScalarExpr;
+use crate::plans::WindowFuncType;
 
 mod auto_cast;
 
@@ -48,6 +49,34 @@ fn rewrite(scalar: &mut ScalarExpr, func_ctx: &FunctionContext) {
             }
             auto_cast::move_cast_to_constant(call, func_ctx);
         }
+        ScalarExpr::WindowFunction(window) => {
+            for partition in &mut window.partition_by {
+                rewrite(partition, func_ctx);
+            }
+            for order in &mut window.order_by {
+                rewrite(&mut order.expr, func_ctx);
+            }
+            match &mut window.func {
+                WindowFuncType::Aggregate(aggregate) => {
+                    for argument in aggregate.exprs_mut() {
+                        rewrite(argument, func_ctx);
+                    }
+                }
+                WindowFuncType::LagLead(function) => {
+                    rewrite(&mut function.arg, func_ctx);
+                    if let Some(default) = &mut function.default {
+                        rewrite(default, func_ctx);
+                    }
+                }
+                WindowFuncType::NthValue(function) => rewrite(&mut function.arg, func_ctx),
+                WindowFuncType::RowNumber
+                | WindowFuncType::Rank
+                | WindowFuncType::DenseRank
+                | WindowFuncType::PercentRank
+                | WindowFuncType::Ntile(_)
+                | WindowFuncType::CumeDist => {}
+            }
+        }
         ScalarExpr::CastExpr(cast) => rewrite(&mut cast.argument, func_ctx),
         ScalarExpr::AutoCast(cast) => rewrite(&mut cast.argument, func_ctx),
         ScalarExpr::LambdaFunction(lambda) => {
@@ -56,8 +85,9 @@ fn rewrite(scalar: &mut ScalarExpr, func_ctx: &FunctionContext) {
             }
         }
         ScalarExpr::UDFLambdaCall(udf) => rewrite(&mut udf.scalar, func_ctx),
-        // Aggregate/window/subquery/runtime UDF bodies are not scalar inputs.
-        // Lambda bodies are processed before their RemoteExpr compilation.
+        // Standalone aggregate/subquery/runtime UDF bodies are not scalar inputs.
+        // Window inputs are rewritten before extraction into WindowFunctionInfo;
+        // lambda bodies are processed before their RemoteExpr compilation.
         _ => {}
     }
 

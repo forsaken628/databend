@@ -2,6 +2,11 @@
 
 `ScalarBinder::bind` finishes semantic resolution before calling `optimize`.
 Lambda bodies use the same boundary before compilation into `RemoteExpr`.
+Window arguments (including aggregate arguments and their ordering), partition
+keys and order keys are traversed before `WindowRewriter` extracts input columns.
+This keeps their optimized representation consistent with SELECT expressions
+for deterministic window-input reuse. Window return types, frames, ordering
+options and the restriction against reusing nondeterministic inputs are unchanged.
 Binding still owns name/scope resolution, special-function semantics,
 bind-required constants and existing bind-time folding. The expression checker's
 pre-existing integer-equality literal normalization is retained.
@@ -54,7 +59,7 @@ hand-built trees. Ordinary function binding does not create identity casts, and
 numeric comparison registration already selects the earlier compatible integer
 type. New rules need an actual SQL-to-bound-expression example first.
 
-Aggregate, window, subquery and runtime UDF internals remain opaque inputs.
+Standalone aggregate, subquery and runtime UDF internals remain opaque inputs.
 This module does not change relational optimizer rules. Regression coverage in
 `tests/it/semantic/type_check/auto_cast.rs` starts from SQL and includes bound,
 optimized and lowered expressions, evaluation equivalence, idempotence and
