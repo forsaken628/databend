@@ -23,6 +23,7 @@ use databend_common_functions::BUILTIN_FUNCTIONS;
 
 use crate::ScalarExpr;
 use crate::optimizer::optimizers::operator::filter::remove_trivial_type_cast;
+use crate::plans::AutoCastExpr;
 use crate::plans::BoundColumnRef;
 use crate::plans::ComparisonOp;
 use crate::plans::FunctionCall;
@@ -243,12 +244,30 @@ impl VisitorMut<'_> for EquivalentConstantsVisitorInner {
     // TODO: casts are not refreshed, so a cast target keeps its nullability when
     // a rewrite makes the argument nullable. No query is known to reach this.
     fn visit_lambda_function(&mut self, lambda: &mut LambdaFunc) -> Result<()> {
-        for argument in &mut lambda.args {
+        let args_len = lambda.args.len();
+        for (index, argument) in lambda.args.iter_mut().enumerate() {
+            let original_type = argument.data_type().into_owned();
             let mut visitor = EquivalentConstantsVisitorInner::default()
                 .eq_constants(self.eq_constants.clone())
                 .left_visit_order(self.left_visit_order)
                 .asserted(false);
             visitor.visit(argument)?;
+
+            // The body is already compiled against the capture input types.
+            // Collection/json/path nullability can change, but substituting a
+            // capture must preserve its exact executable input type.
+            let is_capture = if lambda.func_name == "json_path_transform" {
+                index >= 2
+            } else {
+                index + 1 < args_len
+            };
+            if is_capture && argument.data_type().as_ref() != &original_type {
+                *argument = ScalarExpr::AutoCast(AutoCastExpr {
+                    span: argument.span(),
+                    argument: Box::new(argument.clone()),
+                    target_type: Box::new(original_type),
+                });
+            }
         }
         lambda.refresh_return_type()
     }

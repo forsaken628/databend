@@ -1251,6 +1251,8 @@ impl LambdaFunc {
         Ok(lambda)
     }
 
+    // Rewrites must preserve the capture types used to compile lambda_expr.
+    // This only updates outer result nullability; it cannot rebind the body.
     pub fn refresh_return_type(&mut self) -> Result<()> {
         if self.func_name == "json_path_transform" {
             let [json, path, ..] = self.args.as_slice() else {

@@ -1,0 +1,62 @@
+# Lambda compilation seals body output and capture input types. Preserve those
+# contracts without changing Tuple->Variant's existing JSON-null value policy.
+statement ok
+CREATE TABLE lambda_boundary(id INT NOT NULL, t Tuple(a INT, b STRING) NULL, n INT NULL, nn INT NOT NULL, big BIGINT NOT NULL)
+
+statement ok
+INSERT INTO lambda_boundary VALUES (1, NULL, 1, 1, 1), (2, (7, 'v'), 2, 2, 2), (3, NULL, NULL, 3, 3)
+
+query IT
+SELECT id, to_string(array_transform([1,2], x -> CAST(t AS VARIANT))[1]) FROM lambda_boundary ORDER BY id
+----
+1 {"a":null,"b":null}
+2 {"a":7,"b":"v"}
+3 {"a":null,"b":null}
+
+query IT
+SELECT id, to_string(map_transform_values(map(['k'], [1]), (k,x) -> CAST(t AS VARIANT))['k']) FROM lambda_boundary ORDER BY id
+----
+1 {"a":null,"b":null}
+2 {"a":7,"b":"v"}
+3 {"a":null,"b":null}
+
+query IT
+SELECT id, to_string(json_path_transform(parse_json('[1,2]'), '$[*]', x -> CAST(t AS VARIANT))) FROM lambda_boundary ORDER BY id
+----
+1 [{"a":null,"b":null},{"a":null,"b":null}]
+2 [{"a":7,"b":"v"},{"a":7,"b":"v"}]
+3 [{"a":null,"b":null},{"a":null,"b":null}]
+
+# TRY already returns a nullable body; its value behavior is unchanged.
+query IT
+SELECT id, to_string(array_transform([1,2], x -> TRY_CAST(t AS VARIANT))[1]) FROM lambda_boundary ORDER BY id
+----
+1 {"a":null,"b":null}
+2 {"a":7,"b":"v"}
+3 {"a":null,"b":null}
+
+# Equivalence propagation replaces the WHERE lambda's n capture with 1.
+query III
+SELECT n, array_transform([1,2], x -> n + x)[1], array_transform([1,2], x -> n + x)[2] FROM lambda_boundary WHERE n = 1 AND array_any(array_transform([1,2], x -> n + x)) > 0
+----
+1 2 3
+
+query II
+SELECT n, map_transform_values(map(['k'], [1]), (k,x) -> n + x)['k'] FROM lambda_boundary WHERE n = 1 AND map_size(map_transform_values(map(['k'], [1]), (k,x) -> n + x)) > 0
+----
+1 2
+
+# JSON path captures follow the json/path arguments rather than preceding them.
+query IT
+SELECT n, to_string(json_path_transform(parse_json('[1,2]'), '$[*]', x -> to_variant(n))) FROM lambda_boundary WHERE n = 1 AND json_path_transform(parse_json('[1,2]'), '$[*]', x -> to_variant(n)) IS NOT NULL
+----
+1 [1,1]
+
+# These nested equalities are observed, not asserted. The NULL row must survive.
+query III
+SELECT id, array_transform([1,2], x -> coalesce(n, 0) + x)[1], array_transform([1,2], x -> coalesce(n, 0) + x)[2] FROM lambda_boundary WHERE is_null(n = 1 AND n = 2) AND array_any(array_transform([1,2], x -> coalesce(n, 0) + x)) > 0
+----
+3 1 2
+
+statement ok
+DROP TABLE lambda_boundary

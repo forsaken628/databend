@@ -1,0 +1,105 @@
+=== nullable_tuple_array_body ===
+description: The compiled array body materializes its reported nullable Variant result without changing JSON null values.
+sql: SELECT array_transform([1,2], x -> CAST(t AS VARIANT)) FROM lambda_boundary
+raw_plan:
+EvalScalar
+├── scalars: [array_transform(lambda_boundary.t (#0), [1, 2], ["x"] -> CAST(object_construct_keep_null('a', get(1)(lambda_boundary.t (#0)), 'b', get(2)(lambda_boundary.t (#0))) AS Variant NULL)) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [array_transform(lambda_boundary.t (#0), [1, 2], ["x"] -> CAST(object_construct_keep_null('a', get(1)(lambda_boundary.t (#0)), 'b', get(2)(lambda_boundary.t (#0))) AS Variant NULL)) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+=== nullable_tuple_map_body ===
+description: Map value builders and the compiled body must agree on the exact Variant nullability.
+sql: SELECT map_transform_values(map(['k'], [1]), (k,x) -> CAST(t AS VARIANT)) FROM lambda_boundary
+raw_plan:
+EvalScalar
+├── scalars: [map_transform_values(lambda_boundary.t (#0), {'k':1}, ["k", "x"] -> CAST(object_construct_keep_null('a', get(1)(lambda_boundary.t (#0)), 'b', get(2)(lambda_boundary.t (#0))) AS Variant NULL)) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [map_transform_values(lambda_boundary.t (#0), {'k':1}, ["k", "x"] -> CAST(object_construct_keep_null('a', get(1)(lambda_boundary.t (#0)), 'b', get(2)(lambda_boundary.t (#0))) AS Variant NULL)) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+=== nullable_tuple_json_path_body ===
+description: JSON path lambda compilation also materializes the nullable Variant body contract.
+sql: SELECT json_path_transform(parse_json('[1,2]'), '$[*]', x -> CAST(t AS VARIANT)) FROM lambda_boundary
+raw_plan:
+EvalScalar
+├── scalars: [json_path_transform('[1,2]', '$[*]', lambda_boundary.t (#0), ["x"] -> CAST(object_construct_keep_null('a', get(1)(lambda_boundary.t (#0)), 'b', get(2)(lambda_boundary.t (#0))) AS Variant NULL)) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [json_path_transform('[1,2]', '$[*]', lambda_boundary.t (#0), ["x"] -> CAST(object_construct_keep_null('a', get(1)(lambda_boundary.t (#0)), 'b', get(2)(lambda_boundary.t (#0))) AS Variant NULL)) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+=== try_tuple_array_body ===
+description: TRY already produces a nullable body and must retain its existing value behavior.
+sql: SELECT array_transform([1,2], x -> TRY_CAST(t AS VARIANT)) FROM lambda_boundary
+raw_plan:
+EvalScalar
+├── scalars: [array_transform(lambda_boundary.t (#0), [1, 2], ["x"] -> try_object_construct_keep_null('a', get(1)(lambda_boundary.t (#0)), 'b', get(2)(lambda_boundary.t (#0)))) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [array_transform(lambda_boundary.t (#0), [1, 2], ["x"] -> try_object_construct_keep_null('a', get(1)(lambda_boundary.t (#0)), 'b', get(2)(lambda_boundary.t (#0)))) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+=== reduce_body_keeps_runtime_accumulator_cast ===
+description: Reduce's body result is String, not the accumulator type; runtime conversion remains intentional.
+sql: SELECT array_reduce([1,2], (x,y) -> to_string(x + y)) FROM lambda_boundary
+raw_plan:
+EvalScalar
+├── scalars: [array_reduce([1, 2], ["x", "y"] -> CAST(x (#6) + y (#7) AS String)) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [array_reduce([1, 2], ["x", "y"] -> CAST(x (#6) + y (#7) AS String)) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: []
+    ├── order by: []
+    └── limit: NONE
+

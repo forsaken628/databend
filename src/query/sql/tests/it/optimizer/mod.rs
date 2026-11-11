@@ -32,6 +32,7 @@ mod eliminate_eval_scalar;
 mod hierarchical_grouping_sets;
 mod insert_multi_table;
 mod join_cardinality;
+mod lambda_type_boundaries;
 mod late_split_aggregate;
 mod materialized_cte_distribution;
 mod mutation;

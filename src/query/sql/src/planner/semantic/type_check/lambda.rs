@@ -28,6 +28,7 @@ use databend_common_expression::DataField;
 use databend_common_expression::DataSchema;
 use databend_common_expression::Scalar;
 use databend_common_expression::Symbol;
+use databend_common_expression::type_check::check_cast;
 use databend_common_expression::types::DataType;
 use databend_common_expression::types::Decimal;
 use databend_common_expression::types::NumberDataType;
@@ -501,6 +502,11 @@ where A: super::TypeCheckAdapter
                 let expr = lambda_expr
                     .type_check(&lambda_schema)?
                     .project_column_ref(|index| lambda_schema.index_of(&index.to_string()))?;
+                // The reported body type may include a nullable lift that is
+                // not present in the lowered scalar (e.g. Tuple -> Variant).
+                // Materialize it before sealing the executable body; collection
+                // builders rely on this exact output type.
+                let expr = check_cast(span, false, expr, &lambda_type, &BUILTIN_FUNCTIONS)?;
                 let (expr, _) =
                     ConstantFolder::fold(Cow::Owned(expr), &self.func_ctx, &BUILTIN_FUNCTIONS);
                 let remote_lambda_expr = expr.as_remote_expr();
@@ -674,6 +680,9 @@ where A: super::TypeCheckAdapter
         let expr = lambda_scalar
             .type_check(&lambda_schema)?
             .project_column_ref(|index| lambda_schema.index_of(&index.to_string()))?;
+        // Even when lambda_type already equals param_type, the lowered scalar
+        // can still need its nullable lift materialized.
+        let expr = check_cast(span, false, expr, &param_type, &BUILTIN_FUNCTIONS)?;
         let (expr, _) = ConstantFolder::fold(Cow::Owned(expr), &self.func_ctx, &BUILTIN_FUNCTIONS);
         let remote_lambda_expr = expr.as_remote_expr();
         let lambda_display = format!("{:?} -> {}", params, expr.sql_display());

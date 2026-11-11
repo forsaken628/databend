@@ -1,0 +1,128 @@
+=== nullable_array_capture ===
+description: Replacing n with 1 must keep the compiled Nullable(Int32) capture schema.
+sql: SELECT n FROM lambda_boundary WHERE n = 1 AND array_any(array_transform([1,2], x -> n + x)) > 0
+raw_plan:
+EvalScalar
+├── scalars: [lambda_boundary.n (#3) AS (#3)]
+└── Filter
+    ├── filters: [eq(lambda_boundary.n (#3), 1), gt(array_any(array_transform(lambda_boundary.n (#3), [1, 2], ["x"] -> lambda_boundary.n (#3) + CAST(x (#6) AS UInt8 NULL))), 0)]
+    └── Scan
+        ├── table: default.lambda_boundary (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.lambda_boundary (#0)
+├── filters: [eq(lambda_boundary.n (#3), 1), gt(array_any(array_transform(CAST(1 AS Int32 NULL), [1, 2], ["x"] -> lambda_boundary.n (#3) + CAST(x (#6) AS UInt8 NULL))), 0)]
+├── order by: []
+└── limit: NONE
+
+=== nullable_map_capture ===
+description: Map lambda capture replacement must preserve its compiled input type too.
+sql: SELECT n FROM lambda_boundary WHERE n = 1 AND map_size(map_transform_values(map(['k'], [1]), (k,x) -> n + x)) > 0
+raw_plan:
+EvalScalar
+├── scalars: [lambda_boundary.n (#3) AS (#3)]
+└── Filter
+    ├── filters: [eq(lambda_boundary.n (#3), 1), gt(map_size(map_transform_values(lambda_boundary.n (#3), {'k':1}, ["k", "x"] -> lambda_boundary.n (#3) + CAST(x (#7) AS UInt8 NULL))), 0)]
+    └── Scan
+        ├── table: default.lambda_boundary (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.lambda_boundary (#0)
+├── filters: [eq(lambda_boundary.n (#3), 1), gt(map_size(map_transform_values(CAST(1 AS Int32 NULL), {'k':1}, ["k", "x"] -> lambda_boundary.n (#3) + CAST(x (#7) AS UInt8 NULL))), 0)]
+├── order by: []
+└── limit: NONE
+
+=== json_path_capture_layout ===
+description: JSON path uses [json, path, captures...] rather than leading captures; preserve its nullable capture.
+sql: SELECT n FROM lambda_boundary WHERE n = 1 AND json_path_transform(parse_json('[1,2]'), '$[*]', x -> to_variant(n)) IS NOT NULL
+raw_plan:
+EvalScalar
+├── scalars: [lambda_boundary.n (#3) AS (#3)]
+└── Filter
+    ├── filters: [eq(lambda_boundary.n (#3), 1), is_not_null(CAST(json_path_transform('[1,2]', '$[*]', lambda_boundary.n (#3), ["x"] -> CAST(lambda_boundary.n (#3) AS Variant NULL)) AS Variant NULL))]
+    └── Scan
+        ├── table: default.lambda_boundary (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.lambda_boundary (#0)
+├── filters: [eq(lambda_boundary.n (#3), 1), is_not_null(CAST(json_path_transform('[1,2]', '$[*]', CAST(1 AS Int32 NULL), ["x"] -> CAST(lambda_boundary.n (#3) AS Variant NULL)) AS Variant NULL))]
+├── order by: []
+└── limit: NONE
+
+=== nonnullable_array_capture ===
+description: A same-type non-nullable constant remains substitutable without a redundant conversion.
+sql: SELECT nn FROM lambda_boundary WHERE nn = 1 AND array_any(array_transform([1,2], x -> nn + x)) > 0
+raw_plan:
+EvalScalar
+├── scalars: [lambda_boundary.nn (#4) AS (#4)]
+└── Filter
+    ├── filters: [eq(lambda_boundary.nn (#4), 1), gt(array_any(array_transform(lambda_boundary.nn (#4), [1, 2], ["x"] -> lambda_boundary.nn (#4) + x (#6))), 0)]
+    └── Scan
+        ├── table: default.lambda_boundary (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.lambda_boundary (#0)
+├── filters: [eq(lambda_boundary.nn (#4), 1), gt(array_any(array_transform(1, [1, 2], ["x"] -> lambda_boundary.nn (#4) + x (#6))), 0)]
+├── order by: []
+└── limit: NONE
+
+=== multiple_capture_types ===
+description: Nullable and wider numeric captures retain their separate input contracts after propagation.
+sql: SELECT n FROM lambda_boundary WHERE n = 1 AND big = 1 AND array_any(array_transform([1,2], x -> n + big + x)) > 0
+raw_plan:
+EvalScalar
+├── scalars: [lambda_boundary.n (#3) AS (#3)]
+└── Filter
+    ├── filters: [eq(lambda_boundary.n (#3), 1), eq(lambda_boundary.big (#5), 1), gt(array_any(array_transform(lambda_boundary.n (#3), lambda_boundary.big (#5), [1, 2], ["x"] -> lambda_boundary.n (#3) + CAST(lambda_boundary.big (#5) AS Int64 NULL) + CAST(x (#6) AS UInt8 NULL))), 0)]
+    └── Scan
+        ├── table: default.lambda_boundary (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [lambda_boundary.n (#3) AS (#3), lambda_boundary.big (#5) AS (#6)]
+└── Scan
+    ├── table: default.lambda_boundary (#0)
+    ├── filters: [eq(lambda_boundary.n (#3), 1), eq(lambda_boundary.big (#5), 1), gt(array_any(array_transform(CAST(1 AS Int32 NULL), 1, [1, 2], ["x"] -> lambda_boundary.n (#3) + CAST(lambda_boundary.big (#5) AS Int64 NULL) + CAST(x (#6) AS UInt8 NULL))), 0)]
+    ├── order by: []
+    └── limit: NONE
+
+=== nonasserted_equality_keeps_null_capture ===
+description: Equalities observed under IS NULL are not assertions; a real NULL capture must not become 1 or 2.
+sql: SELECT n FROM lambda_boundary WHERE is_null(n = 1 AND n = 2) AND array_any(array_transform([1,2], x -> coalesce(n, 0) + x)) > 0
+raw_plan:
+EvalScalar
+├── scalars: [lambda_boundary.n (#3) AS (#3)]
+└── Filter
+    ├── filters: [not(is_not_null(and(eq(lambda_boundary.n (#3), 1), eq(lambda_boundary.n (#3), 2)))), gt(array_any(array_transform(lambda_boundary.n (#3), [1, 2], ["x"] -> if(CAST(is_not_null(lambda_boundary.n (#3)) AS Boolean NULL), CAST(assume_not_null(lambda_boundary.n (#3)) AS Int32 NULL), 0) + CAST(x (#6) AS UInt8 NULL))), 0)]
+    └── Scan
+        ├── table: default.lambda_boundary (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+Scan
+├── table: default.lambda_boundary (#0)
+├── filters: [gt(array_any(array_transform(lambda_boundary.n (#3), [1, 2], ["x"] -> if(CAST(is_not_null(lambda_boundary.n (#3)) AS Boolean NULL), CAST(assume_not_null(lambda_boundary.n (#3)) AS Int32 NULL), 0) + CAST(x (#6) AS UInt8 NULL))), 0), not(is_not_null(and(eq(lambda_boundary.n (#3), 1), eq(lambda_boundary.n (#3), 2))))]
+├── order by: []
+└── limit: NONE
+
