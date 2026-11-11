@@ -18,6 +18,7 @@ use databend_common_catalog::table_context::TableContextSettings;
 use databend_common_exception::Result;
 use databend_common_expression::ColumnRef as ExprColumnRef;
 use databend_common_expression::Expr;
+use databend_common_expression::FunctionContext;
 use databend_common_expression::RawExpr;
 use databend_common_expression::Symbol;
 use databend_common_expression::type_check;
@@ -35,6 +36,8 @@ use databend_common_sql::optimizer::ir::SExpr;
 use databend_common_sql::optimizer::optimizers::rule::Rule;
 use databend_common_sql::optimizer::optimizers::rule::RuleNormalizeScalarFilter;
 use databend_common_sql::optimizer::optimizers::rule::TransformResult;
+use databend_common_sql::optimizer::scalar;
+use databend_common_sql::plans::AutoCastExpr;
 use databend_common_sql::plans::BoundColumnRef;
 use databend_common_sql::plans::CastExpr;
 use databend_common_sql::plans::ConstantExpr;
@@ -147,6 +150,30 @@ fn raw_expr_to_typed_scalar(
             )
             .unwrap();
             let return_type = typed_expr.data_type().clone();
+            let Expr::FunctionCall(call) = &typed_expr else {
+                unreachable!("local boolean rule cases must check as function calls")
+            };
+            // Production binding materializes inferred coercions, then scalar
+            // optimization folds their constants. Do not rely on ExprChecker
+            // to perform that optimization in this local rule fixture.
+            let arguments = arguments
+                .into_iter()
+                .zip(&call.args)
+                .map(|(argument, checked)| {
+                    let target_type = checked.data_type().clone();
+                    if argument.data_type().as_ref() == &target_type {
+                        argument
+                    } else {
+                        scalar::optimize(
+                            ScalarExpr::AutoCast(AutoCastExpr::new(argument, target_type.clone())),
+                            target_type,
+                            &FunctionContext::default(),
+                        )
+                        .unwrap()
+                        .0
+                    }
+                })
+                .collect();
             (
                 ScalarExpr::FunctionCall(FunctionCall {
                     span: None,

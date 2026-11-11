@@ -21,6 +21,7 @@ use databend_common_base::base::OrderedFloat;
 use databend_common_exception::ErrorCode;
 use databend_common_exception::Result;
 use databend_common_expression::Scalar;
+use databend_common_expression::conversion::classify_conversion;
 use databend_common_expression::conversion::common_super_type_with_conversion;
 use databend_common_expression::types::DataType;
 use databend_common_expression::types::Decimal;
@@ -228,6 +229,28 @@ impl<'a> InferFilterOptimizer<'a> {
     }
 
     pub fn add_equal_expr(&mut self, left: &ScalarExpr, right: &ScalarExpr) -> bool {
+        // Match constraints on the original inputs through safe inferred
+        // widening. Keep explicit, TRY and value-changing casts as boundaries.
+        let [left, right] = [left, right].map(|mut expr| {
+            while let ScalarExpr::AutoCast(cast) = expr {
+                let source = cast.argument.data_type();
+                let target = cast.target_type.as_ref();
+                if !classify_conversion(&source, target).is_lossless_injective()
+                    || (source.remove_nullable() != target.remove_nullable()
+                        && !(matches!(
+                            source.remove_nullable(),
+                            DataType::Number(_) | DataType::Decimal(_)
+                        ) && matches!(
+                            target.remove_nullable(),
+                            DataType::Number(_) | DataType::Decimal(_)
+                        )))
+                {
+                    break;
+                }
+                expr = &cast.argument;
+            }
+            expr
+        });
         if left == right {
             // Returning true tells the caller that this predicate has been absorbed and
             // can be removed. However, a reflexive equality only forms a singleton

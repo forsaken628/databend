@@ -1,0 +1,631 @@
+=== widened_equality_combines_bounds ===
+description: Inferred integer widening must not hide contradictory constraints on the source column.
+sql: SELECT x FROM ac_left WHERE x = y AND x < 5 AND y >= 5
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0)]
+└── Filter
+    ├── filters: [eq(ac_left.x (#0), CAST(ac_left.y (#1) AS Int64 NULL)), lt(ac_left.x (#0), 5), gte(ac_left.y (#1), 5)]
+    └── Scan
+        ├── table: default.ac_left (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+EmptyResultScan
+
+=== widened_equality_keeps_null_rejection ===
+description: Safe equality inference must still reject NULL even when a reflexive nullable equality is present.
+sql: SELECT x FROM ac_left WHERE x = y AND y = y AND y = 5
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0)]
+└── Filter
+    ├── filters: [eq(ac_left.x (#0), CAST(ac_left.y (#1) AS Int64 NULL)), eq(ac_left.y (#1), ac_left.y (#1)), eq(ac_left.y (#1), 5)]
+    └── Scan
+        ├── table: default.ac_left (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), ac_left.y (#1) AS (#6)]
+└── Scan
+    ├── table: default.ac_left (#0)
+    ├── filters: [eq(ac_left.x (#0), 5), eq(ac_left.y (#1), 5), eq(5, 5), eq(5, 5), eq(5, 5)]
+    ├── order by: []
+    └── limit: NONE
+
+=== decimal_equality_combines_bounds ===
+description: Lossless Decimal widening shares exact bounds without changing scale semantics.
+sql: SELECT d FROM ac_left WHERE d = e AND d < 5.00::DECIMAL(18,2) AND e >= 5.000::DECIMAL(20,3)
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.d (#4) AS (#4)]
+└── Filter
+    ├── filters: [eq(ac_left.d (#4), ac_left.e (#5)), lt(ac_left.d (#4), 5.00), gte(ac_left.e (#5), 5.000)]
+    └── Scan
+        ├── table: default.ac_left (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+EmptyResultScan
+
+=== contradiction_preserves_empty_count ===
+description: Contradictory inferred join bounds eliminate the inputs, not the aggregate's empty-input row.
+sql: SELECT count(*) FROM ac_left l JOIN ac_right r ON l.y = r.x WHERE l.y < 5 AND r.x >= 5
+raw_plan:
+EvalScalar
+├── scalars: [COUNT(*) (#9) AS (#9)]
+└── Aggregate(Initial)
+    ├── group items: []
+    ├── aggregate functions: [count() AS (#9)]
+    └── Filter
+        ├── filters: [lt(ac_left.y (#1), 5), gte(ac_right.x (#6), 5)]
+        └── Join(Inner)
+            ├── build keys: [ac_right.x (#6)]
+            ├── probe keys: [ac_left.y (#1)]
+            ├── other filters: []
+            ├── Scan
+            │   ├── table: default.ac_right (#1)
+            │   ├── filters: []
+            │   ├── order by: []
+            │   └── limit: NONE
+            └── Scan
+                ├── table: default.ac_left (#0)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [0 AS (#9)]
+└── DummyTableScan(DummyTableScan { source_table_indexes: [] })
+
+=== lossy_integer_float_stays_a_boundary ===
+description: A lossy integer/float equality cannot transfer an exact integer constraint to the other column.
+sql: SELECT l.x FROM ac_left l CROSS JOIN ac_right r WHERE l.x = CAST(r.x AS FLOAT64) AND l.x = 9007199254740993 AND r.x = 9007199254740992
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0)]
+└── Filter
+    ├── filters: [eq(CAST(ac_left.x (#0) AS Float64 NULL), CAST(ac_right.x (#6) AS Float64 NULL)), eq(ac_left.x (#0), 9007199254740993), eq(ac_right.x (#6), 9007199254740992)]
+    └── Join(Cross)
+        ├── build keys: []
+        ├── probe keys: []
+        ├── other filters: []
+        ├── Scan
+        │   ├── table: default.ac_right (#1)
+        │   ├── filters: []
+        │   ├── order by: []
+        │   └── limit: NONE
+        └── Scan
+            ├── table: default.ac_left (#0)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), ac_right.x (#6) AS (#9)]
+└── Join(Inner)
+    ├── build keys: [CAST(ac_right.x (#6) AS Float64 NULL)]
+    ├── probe keys: [CAST(ac_left.x (#0) AS Float64 NULL)]
+    ├── other filters: []
+    ├── Scan
+    │   ├── table: default.ac_right (#1)
+    │   ├── filters: [eq(ac_right.x (#6), 9007199254740992)]
+    │   ├── order by: []
+    │   └── limit: NONE
+    └── Scan
+        ├── table: default.ac_left (#0)
+        ├── filters: [eq(ac_left.x (#0), 9007199254740993)]
+        ├── order by: []
+        └── limit: NONE
+
+=== try_cast_stays_a_boundary ===
+description: A TRY_CAST remains fallible and nullable rather than aliasing the underlying string column.
+sql: SELECT l.x FROM ac_left l JOIN ac_right r ON l.x = TRY_CAST(r.s AS BIGINT) WHERE l.x < 5 AND r.s >= '5'
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0)]
+└── Filter
+    ├── filters: [lt(ac_left.x (#0), 5), gte(ac_right.s (#8), '5')]
+    └── Join(Inner)
+        ├── build keys: [TRY_CAST(ac_right.s (#8) AS Int64 NULL)]
+        ├── probe keys: [ac_left.x (#0)]
+        ├── other filters: []
+        ├── Scan
+        │   ├── table: default.ac_right (#1)
+        │   ├── filters: []
+        │   ├── order by: []
+        │   └── limit: NONE
+        └── Scan
+            ├── table: default.ac_left (#0)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), ac_right.s (#8) AS (#9)]
+└── Join(Inner)
+    ├── build keys: [TRY_CAST(ac_right.s (#8) AS Int64 NULL)]
+    ├── probe keys: [ac_left.x (#0)]
+    ├── other filters: []
+    ├── Scan
+    │   ├── table: default.ac_right (#1)
+    │   ├── filters: [lt(TRY_CAST(ac_right.s (#8) AS Int64 NULL), 5), gte(ac_right.s (#8), '5')]
+    │   ├── order by: []
+    │   └── limit: NONE
+    └── Scan
+        ├── table: default.ac_left (#0)
+        ├── filters: [lt(ac_left.x (#0), 5)]
+        ├── order by: []
+        └── limit: NONE
+
+=== nullable_boolean_terms_allow_anti_join ===
+description: A nullable lift around IS NULL must not block anti-join recognition; projected right values remain typed NULL.
+sql: SELECT l.x, r.s FROM ac_left l LEFT JOIN ac_right r ON l.x = r.x WHERE r.x IS NULL AND l.y > 0
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), ac_right.s (#8) AS (#8)]
+└── Filter
+    ├── filters: [not(is_not_null(ac_right.x (#6))), gt(ac_left.y (#1), 0)]
+    └── Join(Left)
+        ├── build keys: [ac_right.x (#6)]
+        ├── probe keys: [ac_left.x (#0)]
+        ├── other filters: []
+        ├── Scan
+        │   ├── table: default.ac_right (#1)
+        │   ├── filters: []
+        │   ├── order by: []
+        │   └── limit: NONE
+        └── Scan
+            ├── table: default.ac_left (#0)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), NULL AS (#6), NULL AS (#7), NULL AS (#8), NULL AS (#9), ac_left.y (#1) AS (#10)]
+└── Join(LeftAnti)
+    ├── build keys: [ac_right.x (#6)]
+    ├── probe keys: [ac_left.x (#0)]
+    ├── other filters: []
+    ├── Scan
+    │   ├── table: default.ac_right (#1)
+    │   ├── filters: []
+    │   ├── order by: []
+    │   └── limit: NONE
+    └── Scan
+        ├── table: default.ac_left (#0)
+        ├── filters: [gt(ac_left.y (#1), 0)]
+        ├── order by: []
+        └── limit: NONE
+
+=== non_key_null_test_keeps_outer_join ===
+description: Testing a nullable non-key value does not prove an unmatched row and must not become an anti join.
+sql: SELECT l.x, r.s FROM ac_left l LEFT JOIN ac_right r ON l.x = r.x WHERE r.s IS NULL AND l.y > 0
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), ac_right.s (#8) AS (#8)]
+└── Filter
+    ├── filters: [not(is_not_null(ac_right.s (#8))), gt(ac_left.y (#1), 0)]
+    └── Join(Left)
+        ├── build keys: [ac_right.x (#6)]
+        ├── probe keys: [ac_left.x (#0)]
+        ├── other filters: []
+        ├── Scan
+        │   ├── table: default.ac_right (#1)
+        │   ├── filters: []
+        │   ├── order by: []
+        │   └── limit: NONE
+        └── Scan
+            ├── table: default.ac_left (#0)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), ac_right.s (#8) AS (#8), ac_left.y (#1) AS (#9)]
+└── Filter
+    ├── filters: [not(is_not_null(ac_right.s (#8)))]
+    └── Join(Left)
+        ├── build keys: [ac_right.x (#6)]
+        ├── probe keys: [ac_left.x (#0)]
+        ├── other filters: []
+        ├── Scan
+        │   ├── table: default.ac_right (#1)
+        │   ├── filters: []
+        │   ├── order by: []
+        │   └── limit: NONE
+        └── Scan
+            ├── table: default.ac_left (#0)
+            ├── filters: [gt(ac_left.y (#1), 0)]
+            ├── order by: []
+            └── limit: NONE
+
+=== nullable_boolean_or_keeps_null_semantics ===
+description: A predicate under IS NULL observes FALSE versus NULL and must not inherit asserted conjunction constraints.
+sql: SELECT x FROM ac_left WHERE is_null(y = 1 AND y = 2) OR nn = 3
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0)]
+└── Filter
+    ├── filters: [or(not(is_not_null(and(eq(ac_left.y (#1), 1), eq(ac_left.y (#1), 2)))), eq(ac_left.nn (#2), 3))]
+    └── Scan
+        ├── table: default.ac_left (#0)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+optimized_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), ac_left.y (#1) AS (#6), ac_left.nn (#2) AS (#7)]
+└── Scan
+    ├── table: default.ac_left (#0)
+    ├── filters: [or_filters(not(is_not_null(and(eq(ac_left.y (#1), 1), eq(ac_left.y (#1), 2)))), eq(ac_left.nn (#2), 3))]
+    ├── order by: []
+    └── limit: NONE
+
+=== nullable_union_keeps_scan_order ===
+description: A nullable-only implicit cast keeps scan order on both UNION branches.
+sql: SELECT y FROM (SELECT y FROM ac_left UNION ALL SELECT nn FROM ac_left) u ORDER BY y LIMIT 3
+raw_plan:
+Limit
+├── limit: [3]
+├── offset: [0]
+└── Sort
+    ├── sort keys: [y (#12) ASC NULLS LAST]
+    ├── limit: [NONE]
+    └── EvalScalar
+        ├── scalars: [y (#12) AS (#12)]
+        └── UnionAll
+            ├── output: [y (#12)]
+            ├── left: [ac_left.y (#1)]
+            ├── right: [CAST(ac_left.nn (#8) AS Int32 NULL)]
+            ├── cte_scan_names: []
+            ├── logical_recursive_cte_id: None
+            ├── EvalScalar
+            │   ├── scalars: [ac_left.y (#1) AS (#1)]
+            │   └── Scan
+            │       ├── table: default.ac_left (#0)
+            │       ├── filters: []
+            │       ├── order by: []
+            │       └── limit: NONE
+            └── EvalScalar
+                ├── scalars: [ac_left.nn (#8) AS (#8)]
+                └── Scan
+                    ├── table: default.ac_left (#1)
+                    ├── filters: []
+                    ├── order by: []
+                    └── limit: NONE
+
+optimized_plan:
+TopN
+├── sort keys: [y (#12) ASC NULLS LAST]
+├── limit: [3]
+├── offset: [0]
+└── UnionAll
+    ├── output: [y (#12)]
+    ├── left: [ac_left.y (#1)]
+    ├── right: [CAST(ac_left.nn (#8) AS Int32 NULL)]
+    ├── cte_scan_names: []
+    ├── logical_recursive_cte_id: None
+    ├── Scan
+    │   ├── table: default.ac_left (#0)
+    │   ├── filters: []
+    │   ├── order by: [ac_left.y (#1) ASC]
+    │   └── limit: NONE
+    └── Scan
+        ├── table: default.ac_left (#1)
+        ├── filters: []
+        ├── order by: [ac_left.nn (#8) ASC]
+        └── limit: NONE
+
+=== numeric_union_keeps_boundary_types ===
+description: Even lossless numeric widening cannot push a scan boundary of the union output type into the source type.
+sql: SELECT x FROM (SELECT x FROM ac_left UNION ALL SELECT y FROM ac_right) u ORDER BY x LIMIT 3
+raw_plan:
+Limit
+├── limit: [3]
+├── offset: [0]
+└── Sort
+    ├── sort keys: [x (#9) ASC NULLS LAST]
+    ├── limit: [NONE]
+    └── EvalScalar
+        ├── scalars: [x (#9) AS (#9)]
+        └── UnionAll
+            ├── output: [x (#9)]
+            ├── left: [ac_left.x (#0)]
+            ├── right: [CAST(ac_right.y (#7) AS Int64 NULL)]
+            ├── cte_scan_names: []
+            ├── logical_recursive_cte_id: None
+            ├── EvalScalar
+            │   ├── scalars: [ac_left.x (#0) AS (#0)]
+            │   └── Scan
+            │       ├── table: default.ac_left (#0)
+            │       ├── filters: []
+            │       ├── order by: []
+            │       └── limit: NONE
+            └── EvalScalar
+                ├── scalars: [ac_right.y (#7) AS (#7)]
+                └── Scan
+                    ├── table: default.ac_right (#1)
+                    ├── filters: []
+                    ├── order by: []
+                    └── limit: NONE
+
+optimized_plan:
+TopN
+├── sort keys: [x (#9) ASC NULLS LAST]
+├── limit: [3]
+├── offset: [0]
+└── UnionAll
+    ├── output: [x (#9)]
+    ├── left: [ac_left.x (#0)]
+    ├── right: [CAST(ac_right.y (#7) AS Int64 NULL)]
+    ├── cte_scan_names: []
+    ├── logical_recursive_cte_id: None
+    ├── Scan
+    │   ├── table: default.ac_left (#0)
+    │   ├── filters: []
+    │   ├── order by: [ac_left.x (#0) ASC]
+    │   └── limit: NONE
+    └── Scan
+        ├── table: default.ac_right (#1)
+        ├── filters: []
+        ├── order by: []
+        └── limit: NONE
+
+=== try_union_does_not_push_scan_order ===
+description: TRY_CAST in a UNION branch must not masquerade as nullable-only order preservation.
+sql: SELECT y FROM (SELECT y FROM ac_left UNION ALL SELECT TRY_CAST(s AS INT) FROM ac_right) u ORDER BY y LIMIT 3
+raw_plan:
+Limit
+├── limit: [3]
+├── offset: [0]
+└── Sort
+    ├── sort keys: [y (#10) ASC NULLS LAST]
+    ├── limit: [NONE]
+    └── EvalScalar
+        ├── scalars: [y (#10) AS (#10)]
+        └── UnionAll
+            ├── output: [y (#10)]
+            ├── left: [ac_left.y (#1)]
+            ├── right: [TRY_CAST(s AS Int32) (#9)]
+            ├── cte_scan_names: []
+            ├── logical_recursive_cte_id: None
+            ├── EvalScalar
+            │   ├── scalars: [ac_left.y (#1) AS (#1)]
+            │   └── Scan
+            │       ├── table: default.ac_left (#0)
+            │       ├── filters: []
+            │       ├── order by: []
+            │       └── limit: NONE
+            └── EvalScalar
+                ├── scalars: [TRY_CAST(ac_right.s (#8) AS Int32 NULL) AS (#9)]
+                └── Scan
+                    ├── table: default.ac_right (#1)
+                    ├── filters: []
+                    ├── order by: []
+                    └── limit: NONE
+
+optimized_plan:
+TopN
+├── sort keys: [y (#10) ASC NULLS LAST]
+├── limit: [3]
+├── offset: [0]
+└── UnionAll
+    ├── output: [y (#10)]
+    ├── left: [ac_left.y (#1)]
+    ├── right: [TRY_CAST(s AS Int32) (#9)]
+    ├── cte_scan_names: []
+    ├── logical_recursive_cte_id: None
+    ├── Scan
+    │   ├── table: default.ac_left (#0)
+    │   ├── filters: []
+    │   ├── order by: [ac_left.y (#1) ASC]
+    │   └── limit: NONE
+    └── EvalScalar
+        ├── scalars: [TRY_CAST(ac_right.s (#8) AS Int32 NULL) AS (#9)]
+        └── Scan
+            ├── table: default.ac_right (#1)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+=== ranking_filter_accepts_typed_constant ===
+description: A typed nullable integer limit still reaches the ranking filter rule.
+sql: SELECT x, row_number() OVER (PARTITION BY y ORDER BY x) AS rn FROM ac_left QUALIFY rn <= CAST(3 AS UInt64 NULL)
+raw_plan:
+EvalScalar
+├── scalars: [ac_left.x (#0) AS (#0), row_number() OVER (PARTITION BY y ORDER BY x) (#6) AS (#6)]
+└── Filter
+    ├── filters: [lte(CAST(row_number() OVER (PARTITION BY y ORDER BY x) (#6) AS UInt64 NULL), 3)]
+    └── Window
+        ├── aggregate function: row_number
+        ├── partition items: [ac_left.y (#1) AS (#1)]
+        ├── order by items: [ac_left.x (#0) AS (#0)]
+        ├── frame: [Range: Preceding(None) ~ CurrentRow]
+        └── Sort
+            ├── sort keys: [ac_left.y (#1) ASC NULLS LAST, ac_left.x (#0) ASC NULLS LAST]
+            ├── limit: [NONE]
+            ├── window top: NONE
+            ├── window function: RowNumber
+            └── EvalScalar
+                ├── scalars: [ac_left.x (#0) AS (#0), ac_left.y (#1) AS (#1)]
+                └── Scan
+                    ├── table: default.ac_left (#0)
+                    ├── filters: []
+                    ├── order by: []
+                    └── limit: NONE
+
+optimized_plan:
+Filter
+├── filters: [lte(row_number() OVER (PARTITION BY y ORDER BY x) (#6), 3)]
+└── Window
+    ├── aggregate function: row_number
+    ├── partition items: [ac_left.y (#1) AS (#1)]
+    ├── order by items: [ac_left.x (#0) AS (#0)]
+    ├── frame: [Range: Preceding(None) ~ CurrentRow]
+    └── Sort
+        ├── sort keys: [ac_left.y (#1) ASC NULLS LAST, ac_left.x (#0) ASC NULLS LAST]
+        ├── limit: [NONE]
+        ├── window top: 3
+        ├── window function: RowNumber
+        └── Scan
+            ├── table: default.ac_left (#0)
+            ├── filters: []
+            ├── order by: [ac_left.y (#1) ASC, ac_left.x (#0) ASC]
+            └── limit: NONE
+
+=== grouping_casts_and_typed_nulls ===
+description: Grouping rewrites retain nullable CAST and TRY_CAST outputs when absent grouping keys become typed NULL.
+sql: SELECT CAST(y AS STRING), TRY_CAST(s AS BIGINT), sum(x) FROM ac_left GROUP BY GROUPING SETS ((y, s), (y), ())
+raw_plan:
+EvalScalar
+├── scalars: [sum(x) (#9) AS (#9), CAST(ac_left.y (#1) AS String NULL) AS (#10), TRY_CAST(ac_left.s (#3) AS Int64 NULL) AS (#11)]
+└── Aggregate(Initial)
+    ├── group items: [ac_left.y (#1) AS (#1), ac_left.s (#3) AS (#3), _grouping_id (#8) AS (#8)]
+    ├── aggregate functions: [sum(ac_left.x (#0)) AS (#9)]
+    └── EvalScalar
+        ├── scalars: [ac_left.x (#0) AS (#0), ac_left.y (#1) AS (#1), ac_left.s (#3) AS (#3)]
+        └── Scan
+            ├── table: default.ac_left (#0)
+            ├── filters: []
+            ├── order by: []
+            └── limit: NONE
+
+optimized_plan:
+Sequence(Sequence)
+├── MaterializedCTE
+│   ├── cte_name: cte_hierarchical_groupingsets_13713238526423356203_cols_1_3
+│   ├── ref_count: 3
+│   ├── channel_size: Some(2)
+│   └── Aggregate(Final)
+│       ├── group items: [ac_left.y (#1) AS (#1), ac_left.s (#3) AS (#3)]
+│       ├── aggregate functions: [sum(ac_left.x (#0)) AS (#9)]
+│       └── Aggregate(Partial)
+│           ├── group items: [ac_left.y (#1) AS (#1), ac_left.s (#3) AS (#3)]
+│           ├── aggregate functions: [sum(ac_left.x (#0)) AS (#9)]
+│           └── Scan
+│               ├── table: default.ac_left (#0)
+│               ├── filters: []
+│               ├── order by: []
+│               └── limit: NONE
+└── Sequence(Sequence)
+    ├── MaterializedCTE
+    │   ├── cte_name: cte_hierarchical_groupingsets_13713238526423356203_cols_1
+    │   ├── ref_count: 1
+    │   ├── channel_size: Some(2)
+    │   └── Aggregate(Final)
+    │       ├── group items: [ac_left.y (#1) AS (#1)]
+    │       ├── aggregate functions: [sum(sum(x) (#9)) AS (#9)]
+    │       └── Aggregate(Partial)
+    │           ├── group items: [ac_left.y (#1) AS (#1)]
+    │           ├── aggregate functions: [sum(sum(x) (#9)) AS (#9)]
+    │           └── MaterializedCTERef
+    │               ├── cte_name: cte_hierarchical_groupingsets_13713238526423356203_cols_1_3
+    │               ├── output columns: [sum(x) (#9), ac_left.y (#1), ac_left.s (#3)]
+    │               └── column mapping: [ac_left.y (#1) -> ac_left.y (#1), ac_left.s (#3) -> ac_left.s (#3), sum(x) (#9) -> sum(x) (#9)]
+    └── Sequence(Sequence)
+        ├── MaterializedCTE
+        │   ├── cte_name: cte_hierarchical_groupingsets_13713238526423356203_empty
+        │   ├── ref_count: 1
+        │   ├── channel_size: Some(2)
+        │   └── Aggregate(Final)
+        │       ├── group items: []
+        │       ├── aggregate functions: [sum(sum(x) (#9)) AS (#9)]
+        │       └── Aggregate(Partial)
+        │           ├── group items: []
+        │           ├── aggregate functions: [sum(sum(x) (#9)) AS (#9)]
+        │           └── MaterializedCTERef
+        │               ├── cte_name: cte_hierarchical_groupingsets_13713238526423356203_cols_1_3
+        │               ├── output columns: [sum(x) (#9), ac_left.y (#1), ac_left.s (#3)]
+        │               └── column mapping: [ac_left.y (#1) -> ac_left.y (#1), ac_left.s (#3) -> ac_left.s (#3), sum(x) (#9) -> sum(x) (#9)]
+        └── UnionAll
+            ├── output: [sum(x) (#9), y (#10), TRY_CAST(s AS Int64) (#11), ac_left.y (#1), ac_left.s (#3), _grouping_id (#8)]
+            ├── left: [sum(x) (#9), y (#10), TRY_CAST(s AS Int64) (#11), ac_left.y (#1), ac_left.s (#3), _grouping_id (#8)]
+            ├── right: [sum(x) (#9), y (#10), TRY_CAST(s AS Int64) (#11), ac_left.y (#1), ac_left.s (#3), _grouping_id (#8)]
+            ├── cte_scan_names: []
+            ├── logical_recursive_cte_id: None
+            ├── UnionAll
+            │   ├── output: [sum(x) (#9), y (#10), TRY_CAST(s AS Int64) (#11), ac_left.y (#1), ac_left.s (#3), _grouping_id (#8)]
+            │   ├── left: [sum(x) (#9), y (#10), TRY_CAST(s AS Int64) (#11), ac_left.y (#1), ac_left.s (#3), _grouping_id (#8)]
+            │   ├── right: [sum(x) (#9), y (#10), TRY_CAST(s AS Int64) (#11), ac_left.y (#1), ac_left.s (#3), _grouping_id (#8)]
+            │   ├── cte_scan_names: []
+            │   ├── logical_recursive_cte_id: None
+            │   ├── EvalScalar
+            │   │   ├── scalars: [CAST(ac_left.y (#1) AS Int32 NULL) AS (#1), CAST(ac_left.s (#3) AS String NULL) AS (#3), 0 AS (#8), sum(x) (#9) AS (#9), CAST(CAST(ac_left.y (#1) AS Int32 NULL) AS String NULL) AS (#10), TRY_CAST(CAST(ac_left.s (#3) AS String NULL) AS Int64 NULL) AS (#11)]
+            │   │   └── MaterializedCTERef
+            │   │       ├── cte_name: cte_hierarchical_groupingsets_13713238526423356203_cols_1_3
+            │   │       ├── output columns: [sum(x) (#9), ac_left.y (#1), ac_left.s (#3)]
+            │   │       └── column mapping: [ac_left.y (#1) -> ac_left.y (#1), ac_left.s (#3) -> ac_left.s (#3), sum(x) (#9) -> sum(x) (#9)]
+            │   └── EvalScalar
+            │       ├── scalars: [CAST(ac_left.y (#1) AS Int32 NULL) AS (#1), NULL AS (#3), 2 AS (#8), sum(x) (#9) AS (#9), CAST(CAST(ac_left.y (#1) AS Int32 NULL) AS String NULL) AS (#10), TRY_CAST(NULL AS Int64 NULL) AS (#11)]
+            │       └── MaterializedCTERef
+            │           ├── cte_name: cte_hierarchical_groupingsets_13713238526423356203_cols_1
+            │           ├── output columns: [sum(x) (#9), ac_left.y (#1)]
+            │           └── column mapping: [ac_left.y (#1) -> ac_left.y (#1), sum(x) (#9) -> sum(x) (#9)]
+            └── EvalScalar
+                ├── scalars: [NULL AS (#1), NULL AS (#3), 3 AS (#8), sum(x) (#9) AS (#9), CAST(NULL AS String NULL) AS (#10), TRY_CAST(NULL AS Int64 NULL) AS (#11)]
+                └── MaterializedCTERef
+                    ├── cte_name: cte_hierarchical_groupingsets_13713238526423356203_empty
+                    ├── output columns: [sum(x) (#9)]
+                    └── column mapping: [sum(x) (#9) -> sum(x) (#9)]
+
+=== union_filter_refreshes_scalar_inputs ===
+description: Filter substitution through UNION keeps implicit nullable coercions and their checked function signatures.
+sql: SELECT y FROM (SELECT nn AS y FROM ac_left UNION ALL SELECT y FROM ac_right) u WHERE y + 1 = 5
+raw_plan:
+EvalScalar
+├── scalars: [y (#9) AS (#9)]
+└── Filter
+    ├── filters: [eq(plus(y (#9), 1), 5)]
+    └── UnionAll
+        ├── output: [y (#9)]
+        ├── left: [CAST(ac_left.nn (#2) AS Int32 NULL)]
+        ├── right: [ac_right.y (#7)]
+        ├── cte_scan_names: []
+        ├── logical_recursive_cte_id: None
+        ├── EvalScalar
+        │   ├── scalars: [ac_left.nn (#2) AS (#2)]
+        │   └── Scan
+        │       ├── table: default.ac_left (#0)
+        │       ├── filters: []
+        │       ├── order by: []
+        │       └── limit: NONE
+        └── EvalScalar
+            ├── scalars: [ac_right.y (#7) AS (#7)]
+            └── Scan
+                ├── table: default.ac_right (#1)
+                ├── filters: []
+                ├── order by: []
+                └── limit: NONE
+
+optimized_plan:
+UnionAll
+├── output: [y (#9)]
+├── left: [CAST(ac_left.nn (#2) AS Int32 NULL)]
+├── right: [ac_right.y (#7)]
+├── cte_scan_names: []
+├── logical_recursive_cte_id: None
+├── Scan
+│   ├── table: default.ac_left (#0)
+│   ├── filters: [eq(plus(CAST(ac_left.nn (#2) AS Int32 NULL), 1), 5)]
+│   ├── order by: []
+│   └── limit: NONE
+└── Scan
+    ├── table: default.ac_right (#1)
+    ├── filters: [eq(plus(ac_right.y (#7), 1), 5)]
+    ├── order by: []
+    └── limit: NONE
+

@@ -108,3 +108,66 @@ SELECT max(w) FROM (SELECT count_if(v = 1::Int64) OVER () AS w FROM auto_cast_un
 
 statement ok
 DROP TABLE auto_cast_unsigned
+
+# Inference must see safe implicit widening without forgetting NULL rejection.
+statement ok
+CREATE TABLE auto_cast_inference(x Int64 NULL, y Int32 NULL, nn Int32 NOT NULL, s String NULL)
+
+statement ok
+INSERT INTO auto_cast_inference VALUES (1, 1, 1, 'one'), (NULL, NULL, 2, NULL), (3, 4, 3, '3'), (5, 5, 4, NULL), (NULL, 1, 5, 'bad')
+
+query I
+SELECT count(*) FROM auto_cast_inference WHERE x = y AND x < 5 AND y >= 5
+----
+0
+
+query I
+SELECT count(*) FROM auto_cast_inference WHERE x = y AND y = y
+----
+2
+
+# An eliminated join input still gives COUNT's one empty-input row.
+query I
+SELECT count(*) FROM auto_cast_inference l JOIN auto_cast_inference r ON l.y = r.x WHERE l.y < 5 AND r.x >= 5
+----
+0
+
+# IS NULL observes NULL versus FALSE in the nested conjunction.
+query I
+SELECT count(*) FROM auto_cast_inference WHERE is_null(y = 1 AND y = 2) OR nn = 3
+----
+2
+
+# Only a null equi-key proves an unmatched row. A nullable payload does not.
+query II
+SELECT count(*), count(r.s) FROM auto_cast_inference l LEFT JOIN auto_cast_inference r ON l.x = r.x WHERE r.x IS NULL AND l.y > 0
+----
+1 0
+
+query I
+SELECT count(*) FROM auto_cast_inference l LEFT JOIN auto_cast_inference r ON l.x = r.x WHERE r.s IS NULL AND l.y > 0
+----
+2
+
+# Nullable-only UNION coercions keep ordering while retaining NULL values.
+query I
+SELECT y FROM (SELECT y FROM auto_cast_inference UNION ALL SELECT nn FROM auto_cast_inference) u ORDER BY y ASC NULLS LAST LIMIT 5
+----
+1
+1
+1
+2
+3
+
+# A numeric widening must not pass an Int64 scan boundary into an Int32 scan.
+query I
+SELECT x FROM (SELECT x FROM auto_cast_inference UNION ALL SELECT nn FROM auto_cast_inference) u ORDER BY x ASC NULLS LAST LIMIT 5
+----
+1
+1
+2
+3
+3
+
+statement ok
+DROP TABLE auto_cast_inference

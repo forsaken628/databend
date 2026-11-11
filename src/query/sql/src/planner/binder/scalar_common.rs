@@ -185,6 +185,15 @@ fn is_conjunction(func: &FunctionCall) -> bool {
 
 pub fn conjunctions(scalar: &ScalarExpr) -> impl Iterator<Item = &ScalarExpr> {
     conjunctions_with(scalar, |scalar, stack| match scalar {
+        // A nullable lift changes the declared type, not a predicate's truth
+        // value. Expose the same logical terms without touching value casts.
+        ScalarExpr::AutoCast(cast)
+            if cast.argument.data_type().remove_nullable() == DataType::Boolean
+                && *cast.target_type == DataType::Boolean.wrap_nullable() =>
+        {
+            stack.push(cast.argument.as_ref());
+            None
+        }
         ScalarExpr::FunctionCall(func) if is_conjunction(func) => {
             stack.extend(func.arguments.iter().rev());
             None
@@ -195,6 +204,13 @@ pub fn conjunctions(scalar: &ScalarExpr) -> impl Iterator<Item = &ScalarExpr> {
 
 pub fn into_conjunctions(scalar: ScalarExpr) -> impl Iterator<Item = ScalarExpr> {
     conjunctions_with(scalar, |scalar, stack| match scalar {
+        ScalarExpr::AutoCast(cast)
+            if cast.argument.data_type().remove_nullable() == DataType::Boolean
+                && *cast.target_type == DataType::Boolean.wrap_nullable() =>
+        {
+            stack.push(*cast.argument);
+            None
+        }
         ScalarExpr::FunctionCall(func) if is_conjunction(&func) => {
             stack.extend(func.arguments.into_iter().rev());
             None
@@ -434,12 +450,13 @@ mod tests {
     }
 
     fn and(lhs: ScalarExpr, rhs: ScalarExpr) -> ScalarExpr {
+        let return_type = ScalarExpr::passthrough_nullable_type(DataType::Boolean, [&lhs, &rhs]);
         ScalarExpr::FunctionCall(FunctionCall {
             span: None,
             func_name: "and".to_string(),
             params: vec![],
             arguments: vec![lhs, rhs],
-            return_type: Box::new(DataType::Boolean),
+            return_type: Box::new(return_type),
         })
     }
 
@@ -469,6 +486,50 @@ mod tests {
 
         assert_eq!(conjunctions(&expr).count(), 4);
         assert_eq!(into_conjunctions(expr).count(), 4);
+    }
+
+    #[test]
+    fn test_conjunctions_see_through_only_boolean_nullable_lifts() {
+        let nullable = DataType::Boolean.wrap_nullable();
+        let null = ScalarExpr::TypedConstantExpr(
+            ConstantExpr {
+                span: None,
+                value: Scalar::Null,
+            },
+            nullable.clone(),
+        );
+        let terms = vec![bool_constant(false), null];
+        let expr = ScalarExpr::AutoCast(AutoCastExpr::new(
+            and(
+                ScalarExpr::AutoCast(AutoCastExpr::new(terms[0].clone(), nullable.clone())),
+                terms[1].clone(),
+            ),
+            nullable.clone(),
+        ));
+        assert_eq!(conjunctions(&expr).cloned().collect::<Vec<_>>(), terms);
+        assert_eq!(into_conjunctions(expr).collect::<Vec<_>>(), terms);
+
+        for is_try in [false, true] {
+            let explicit: ScalarExpr = crate::plans::CastExpr {
+                span: None,
+                is_try,
+                argument: Box::new(and(bool_constant(true), bool_constant(false))),
+                target_type: Box::new(nullable.clone()),
+            }
+            .into();
+            assert_eq!(conjunctions(&explicit).count(), 1);
+            assert_eq!(into_conjunctions(explicit).count(), 1);
+        }
+        let value_cast = ScalarExpr::AutoCast(AutoCastExpr::new(
+            ConstantExpr {
+                span: None,
+                value: Scalar::String("false".to_string()),
+            }
+            .into(),
+            nullable,
+        ));
+        assert_eq!(conjunctions(&value_cast).count(), 1);
+        assert_eq!(into_conjunctions(value_cast).count(), 1);
     }
 
     #[test]

@@ -107,14 +107,13 @@ fn union_branch_order(
 /// Whether `expr` casts column `symbol` to its nullable type, which keeps the
 /// values and their order. The binder coerces union branches with such casts.
 fn is_nullable_cast_of(expr: &ScalarExpr, symbol: Symbol) -> bool {
-    let ScalarExpr::CastExpr(cast) = expr else {
+    let Some((argument, target_type)) = expr.as_non_try_cast() else {
         return false;
     };
-    let ScalarExpr::BoundColumnRef(column_ref) = cast.argument.as_ref() else {
+    let ScalarExpr::BoundColumnRef(column_ref) = argument else {
         return false;
     };
-    !cast.is_try
-        && column_ref.column.index == symbol
-        && matches!(cast.target_type.as_ref(), DataType::Nullable(_))
-        && column_ref.column.data_type.remove_nullable() == cast.target_type.remove_nullable()
+    column_ref.column.index == symbol
+        && matches!(target_type, DataType::Nullable(_))
+        && column_ref.column.data_type.remove_nullable() == target_type.remove_nullable()
 }
