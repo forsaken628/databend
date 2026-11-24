@@ -29,6 +29,10 @@ EvalScalar
 ├── estimated rows: 1.00
 └── DummyTableScan
 
+# Check the build side independently of runtime filter generation.
+statement ok
+SET enable_join_runtime_filter = 0
+
 query T
 EXPLAIN SELECT * FROM (SELECT * FROM z WHERE n > 10) AS a LEFT JOIN (SELECT * FROM t WHERE k > 500) AS b ON a.k = b.k
 ----
@@ -66,6 +70,9 @@ HashJoin
         ├── pruning stats: [segments: <read cost: <slt:ignore>, range pruning: 1 to 0 cost: <slt:ignore>>]
         ├── push downs: [filters: [t.k (#2) > 500], limit: NONE]
         └── estimated rows: 0.00
+
+statement ok
+UNSET enable_join_runtime_filter
 
 statement ok
 INSERT INTO z VALUES (100, 20)

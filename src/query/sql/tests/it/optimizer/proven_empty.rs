@@ -97,13 +97,18 @@ async fn create_context() -> Result<Arc<LiteTableContext>> {
         Some(table_statistics(1000)),
         HashMap::from([
             ("k".to_string(), int_stat(1, 1000, 1000)),
-            ("n".to_string(), BasicColumnStatistics {
-                min: None,
-                max: None,
-                ndv: Some(0),
-                null_count: 1000,
-                in_memory_size: 1000,
-            }),
+            (
+                "n".to_string(),
+                BasicColumnStatistics::new(
+                    None,
+                    None,
+                    1000,
+                    1000,
+                    NdvEstimate::exact(0.0),
+                    Some(1000),
+                )
+                .unwrap(),
+            ),
         ]),
         HashMap::new(),
     )
